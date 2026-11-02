@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -239,6 +240,30 @@ type IOS struct {
 	// MyGo's own, e.g. the usage descriptions of what the app asks for:
 	//   "NSCameraUsageDescription": "Scan documents with the camera."
 	InfoPlist map[string]any `json:"infoPlist"`
+	// AssociatedDomains are the hosts of the app's universal links, which
+	// reach mygo.App.OnOpenURL: "example.com" signs the app with the
+	// entitlement applinks:example.com, and a value with its own service, as
+	// "webcredentials:example.com", stays as it is. The provisioning profile
+	// needs the capability Associated Domains, and each host an
+	// apple-app-site-association file.
+	AssociatedDomains []string `json:"associatedDomains"`
+	// LaunchScreen is what the system shows while the app starts (default:
+	// the system background).
+	LaunchScreen *IOSLaunchScreen `json:"launchScreen"`
+	// BackgroundModes are the app's UIBackgroundModes, as "audio", "fetch"
+	// or "remote-notification", with those its plugins ask for.
+	BackgroundModes []string `json:"backgroundModes"`
+}
+
+// IOSLaunchScreen is the app's launch screen, which has no storyboard: a
+// UILaunchScreen in Info.plist that names a color and an image of the app's
+// asset catalog.
+type IOSLaunchScreen struct {
+	// Background is its color, as "#102030".
+	Background string `json:"background"`
+	// Image is a PNG shown centered, at the size of a 3x screen: a logo of
+	// 600x600 pixels takes 200x200 points.
+	Image string `json:"image"`
 }
 
 // Android configures the Android app (mygo build -platform android).
@@ -259,6 +284,26 @@ type Android struct {
 	// signed with the debug key.
 	Keystore string `json:"keystore"`
 	KeyAlias string `json:"keyAlias"`
+	// AppLinks are the hosts of the app's https deep links, verified by
+	// Android (android:autoVerify), which reach mygo.App.OnOpenURL: each
+	// serves /.well-known/assetlinks.json naming the app. "*.example.com"
+	// takes its subdomains.
+	AppLinks []string `json:"appLinks"`
+	// AdaptiveIcon is the launcher icon of Android 8.0 and later, which the
+	// launcher masks and moves. Without it, launchers show icon as it is.
+	AdaptiveIcon *AndroidAdaptiveIcon `json:"adaptiveIcon"`
+	// Splash is the color of the screen the system shows while the app
+	// starts, as "#102030" (default: the theme's).
+	Splash string `json:"splash"`
+}
+
+// AndroidAdaptiveIcon is an icon of two layers.
+type AndroidAdaptiveIcon struct {
+	// Foreground is a square PNG, ideally 432x432 or more, with transparency
+	// around what it shows: launchers crop to the middle 72/108 of it.
+	Foreground string `json:"foreground"`
+	// Background is the color under it, as "#102030".
+	Background string `json:"background"`
 }
 
 // Notarize holds notarytool credentials stored in the keychain with
@@ -384,6 +429,9 @@ func (c *Config) validate() error {
 			return fmt.Errorf("i18n.dir %q is not a directory of the project: the catalogs are a Go package of their own, as locales", c.I18n.Dir)
 		}
 	}
+	if err := c.validateMobile(); err != nil {
+		return err
+	}
 	if c.DevURL != "" {
 		if u, err := url.Parse(c.DevURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return fmt.Errorf("devUrl %q is not an http(s) URL", c.DevURL)
@@ -392,7 +440,78 @@ func (c *Config) validate() error {
 	return nil
 }
 
+// validateMobile checks the sections of phones, which say what the stores
+// and the systems would refuse only much later.
+func (c *Config) validateMobile() error {
+	for _, d := range c.IOS.AssociatedDomains {
+		// A value with a service keeps it; its host may name a mode, as
+		// applinks:example.com?mode=developer.
+		host := d
+		if _, after, ok := strings.Cut(d, ":"); ok {
+			host, _, _ = strings.Cut(after, "?")
+		}
+		if !hostRe.MatchString(host) {
+			return fmt.Errorf("ios.associatedDomains: %q is not a host, as example.com or applinks:example.com", d)
+		}
+	}
+	if l := c.IOS.LaunchScreen; l != nil {
+		if l.Background == "" && l.Image == "" {
+			return errors.New("ios.launchScreen needs a background or an image")
+		}
+		if l.Background != "" {
+			if _, err := parseHexColor(l.Background); err != nil {
+				return fmt.Errorf("ios.launchScreen.background: %w", err)
+			}
+		}
+	}
+	for _, m := range c.IOS.BackgroundModes {
+		if m == "" || strings.ContainsFunc(m, unicode.IsSpace) {
+			return fmt.Errorf("ios.backgroundModes: %q is not a mode, as audio or fetch", m)
+		}
+	}
+	for _, h := range c.Android.AppLinks {
+		if !hostRe.MatchString(h) {
+			return fmt.Errorf("android.appLinks: %q is not a host, as example.com or *.example.com, without https://", h)
+		}
+	}
+	if a := c.Android.AdaptiveIcon; a != nil {
+		if a.Foreground == "" {
+			return errors.New("android.adaptiveIcon needs a foreground")
+		}
+		if _, err := parseHexColor(a.Background); err != nil {
+			return fmt.Errorf("android.adaptiveIcon.background: %w", err)
+		}
+	}
+	if c.Android.Splash != "" {
+		if _, err := parseHexColor(c.Android.Splash); err != nil {
+			return fmt.Errorf("android.splash: %w", err)
+		}
+	}
+	return nil
+}
+
+// parseHexColor reads a color as "#rgb" or "#rrggbb".
+func parseHexColor(s string) ([3]uint8, error) {
+	hex, ok := strings.CutPrefix(s, "#")
+	if ok && len(hex) == 3 {
+		hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+	}
+	var out [3]uint8
+	if !ok || len(hex) != 6 {
+		return out, fmt.Errorf("%q is not a color, as #102030", s)
+	}
+	for i := range out {
+		v, err := strconv.ParseUint(hex[i*2:i*2+2], 16, 8)
+		if err != nil {
+			return out, fmt.Errorf("%q is not a color, as #102030", s)
+		}
+		out[i] = uint8(v)
+	}
+	return out, nil
+}
+
 var (
+	hostRe   = regexp.MustCompile(`^(\*\.)?[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)*$`)
 	nonIdent = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 	slugRe   = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	schemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*$`)

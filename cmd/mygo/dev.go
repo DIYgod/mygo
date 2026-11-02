@@ -55,7 +55,7 @@ keep it: the app's own setting is left as it is.`)
 	openPage := flags.Bool("open", true, "with -web, open the app in the browser")
 	lang := flags.String("lang", "", "run the app in this language (as de, or the pseudo locales en-XA and ar-XB), without keeping it")
 	platform := flags.String("platform", "", "develop the app on a phone: ios (the simulator) or android (a device or an emulator)")
-	device := flags.String("device", "", "with -platform, the simulator (name or UDID) or the Android device (adb serial) to run on")
+	device := flags.String("device", "", "with -platform, what to run on (mygo devices lists them): an iOS simulator or device (name or UDID), an Android device (adb serial) or emulator, which it starts")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -80,11 +80,14 @@ keep it: the app's own setting is left as it is.`)
 	switch *platform {
 	case "":
 	case "ios":
-		if s.device, err = bootedSimulator(*device); err != nil {
+		if s.device, err = iosRunTarget(*device); err != nil {
 			return err
 		}
 	case "android":
-		if s.device, err = androidDevice(*device); err != nil {
+		if s.device, err = androidDevice(ctx, *device); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 	default:
