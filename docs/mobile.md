@@ -9,10 +9,14 @@ emulator or a device as you change it; `mygo build` makes what the App
 Store and Google Play take.
 
 ```sh
+mygo doctor                    # what is there, and what is missing
+mygo devices                   # what -device takes
 mygo dev -platform ios         # the booted iOS simulator
 mygo dev -platform android     # the device or emulator adb reaches
 mygo build -platform ios       # a signed .ipa
 mygo build -platform android   # an .apk and an .aab
+mygo publish -platform ios     # the .ipa to App Store Connect
+mygo publish -platform android # the .aab to a track of Google Play
 ```
 
 ## What you need
@@ -31,6 +35,31 @@ mygo build -platform android   # an .apk and an .aab
 
 Desktop builds still need neither cgo nor these tools.
 
+`mygo doctor` checks them. On a Mac it looks at Xcode and its command line
+tools, the iOS SDK, the simulators, the signing identities and the
+provisioning profiles; on every system at the Android SDK, adb, the NDK, the
+JDK, the emulators and the devices connected. What is missing there is a
+warning that says how to get it, never a failure: an app for desktops needs
+none of it.
+
+## Devices
+
+`mygo devices` lists what `-device` takes, by name and ID: iOS simulators
+with their runtimes, iOS devices, Android devices and emulators, and the
+virtual devices (AVDs) of emulators that are not running. `-json` prints it
+for scripts.
+
+```
+NAME           ID                                    PLATFORM    KIND       STATE
+iPhone 18 Pro  629AC4ED-EFB6-4090-9143-E4B57B3220DA  iOS 27.0    simulator  booted
+Jane's iPhone  00008140-000E55192283801C             iOS 27.0.1  device     connected
+Pixel_9        emulator-5554                         Android 17  emulator   booted
+Tablet         Tablet                                Android     emulator   shutdown
+```
+
+It asks `xcrun simctl`, `xcrun devicectl` (Xcode 15 and later), `adb` and
+`emulator`, and leaves out what it cannot ask.
+
 ## Developing
 
 `mygo dev -platform ios` builds the app for the simulator, installs it on
@@ -47,6 +76,32 @@ through `adb reverse`, at the same URL. Without `devUrl`, the app embeds
 The development app is "<name> Dev" with the identifier
 "<identifier>.dev", as on the desktop, so it installs beside the release.
 
+### On an iPhone or iPad
+
+`mygo dev -platform ios -device <name or UDID>` also takes a device, which
+needs Developer Mode on (Settings › Privacy & Security). The app builds for
+the device and signs with a development provisioning profile: the installed
+one that best fits "<identifier>.dev", usually the wildcard profile Xcode
+keeps, whose certificate is in the keychain and which lists the device. A
+profile `ios.provisioningProfile` names is for `ios.distribution`, so it signs
+development builds only when that is `development`.
+
+`xcrun devicectl` installs and launches it, the app's output in the console;
+an Xcode whose `devicectl` has no `--console` still runs the app, without its
+output. A device is not on the Mac's network stack: it loads a `devUrl` on
+`localhost` at the Mac's address on the network, which the dev server must
+listen on (`vite --host`), and development builds allow local networking and
+say why for the system's prompt.
+
+A wildcard profile cannot have Associated Domains: with one, the development
+build leaves `ios.associatedDomains` out and says so.
+
+### Android emulators
+
+`-device` also takes the name of an AVD. One that is not running starts,
+apart from `mygo dev`, which waits for its system to finish booting; it keeps
+running after `mygo dev` ends, as starting it again is slow.
+
 ## Building
 
 ```sh
@@ -61,8 +116,7 @@ fits the app's identifier and `ios.distribution` (`app-store` by default,
 which is also TestFlight's), whose certificate is in the keychain; it
 carries the privacy manifest App Store Connect asks for, made from what the
 app's code uses, unless the project has its own
-`ios/PrivacyInfo.xcprivacy`. Upload it with Transporter or `xcrun altool`.
-The CLI refuses a build that names Apple's private methods, which App
+`ios/PrivacyInfo.xcprivacy`. The CLI refuses a build that names Apple's private methods, which App
 Review turns down.
 
 The `.aab` is what Google Play takes, the `.apk` what other stores and
@@ -82,6 +136,78 @@ export default defineConfig({
   android: { permissions: ["CAMERA"], keystore: "upload.jks", keyAlias: "upload" },
 });
 ```
+
+## Publishing
+
+`mygo publish` uploads what `mygo build` wrote for this version, or `-file`.
+
+```sh
+mygo build -platform ios && mygo publish -platform ios
+mygo build -platform android && mygo publish -platform android -track beta
+```
+
+**iOS** uploads the `.ipa` to App Store Connect with `xcrun altool`, where it
+shows in TestFlight once processed. It takes an API key of the team (App Store
+Connect › Users and Access › Integrations), which never goes on the command
+line:
+
+| Variable | |
+|---|---|
+| `MYGO_ASC_KEY_ID` | the key's ID |
+| `MYGO_ASC_ISSUER_ID` | the issuer's ID |
+| `MYGO_ASC_KEY` | the path of its `.p8` |
+
+**Android** uploads the `.aab` through Google Play's Android Publisher API:
+an edit, its bundle, a release on the track, then the commit, or the edit
+deleted if anything fails. `MYGO_PLAY_SERVICE_ACCOUNT` holds the path of a
+service account's JSON key, or the JSON itself, for secrets of CI; the account
+needs access to the app in Play Console. `-track` is `internal` by default, or
+`alpha`, `beta`, `production` or a closed testing track's name. Google Play
+takes the first upload of an app in its console only, and an app it has not
+reviewed yet takes releases only with `-status draft`.
+
+The app's `identifier` is the package it uploads to.
+
+## Links, icons and launch screens
+
+```ts
+export default defineConfig({
+  ios: {
+    associatedDomains: ["example.com"],
+    launchScreen: { background: "#102030", image: "resources/logo.png" },
+    backgroundModes: ["audio", "remote-notification"],
+  },
+  android: {
+    appLinks: ["example.com"],
+    adaptiveIcon: { foreground: "resources/icon-foreground.png", background: "#102030" },
+    splash: "#102030",
+  },
+});
+```
+
+**Links**: https URLs of your domains open the app, and reach
+`App.OnOpenURL`. `ios.associatedDomains` signs the app with
+`applinks:example.com` (a value with its own service, as
+`webcredentials:example.com`, stays as it is); the app ID needs the capability
+Associated Domains, and the host an `apple-app-site-association` file.
+`android.appLinks` adds a verified intent filter per host (`*.example.com`
+takes its subdomains), and each host serves
+`/.well-known/assetlinks.json` naming the app and its signing key.
+
+**Android's icon**: `android.adaptiveIcon` is the launcher icon of Android 8.0
+and later, a PNG of 432×432 or more over a color. Launchers crop to the middle
+72/108 of it and may move it, so keep what matters there. `icon` stays what
+older systems show.
+
+**Launch screens**: `ios.launchScreen` is a color, an image centered on it, or
+both, with no storyboard: the CLI compiles them into the app's asset catalog
+and names them in `UILaunchScreen`. The image is a PNG at the size of a 3×
+screen, so a logo of 600×600 pixels takes 200×200 points. `android.splash` is
+the color of the screen the system shows while the app starts, under the
+app's icon.
+
+**Background modes**: `ios.backgroundModes` are the app's
+`UIBackgroundModes`, with those its plugins ask for.
 
 ## Tabs and stacks
 
