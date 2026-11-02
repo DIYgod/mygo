@@ -14,7 +14,7 @@ func TestRoundTrip(t *testing.T) {
 	if op := r.Uvarint(); op != CallCreateWindow {
 		t.Fatalf("op = %d", op)
 	}
-	got := CreateWindow{ID: r.Int(), Surface: r.Bool(), Background: r.Int(), HasBackground: r.Bool(), Schemes: r.Strings(),
+	got := CreateWindow{ID: r.Int(), Surface: r.Bool(), OwnScene: r.Bool(), Background: r.Int(), HasBackground: r.Bool(), Schemes: r.Strings(),
 		Scripts: r.Strings(), ScriptFlags: r.Strings(), UserAgent: r.String(), UserAgentSuffix: r.String(), Inspectable: r.Bool()}
 	if r.Err != nil || got.ID != 3 || !got.Surface || got.Background != 0xff8000ff || !slices.Equal(got.Schemes, m.Schemes) ||
 		got.UserAgent != m.UserAgent || !got.Inspectable {
