@@ -44,6 +44,8 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
         return r
     }
 
+    func firstFrame(_ c: FirstFrameCall) {} // iOS's launch screen goes by itself
+
     func appInfo() -> AppInfoReply {
         var r = AppInfoReply()
         r.background = UIApplication.shared.applicationState == .background // the system started it for a task

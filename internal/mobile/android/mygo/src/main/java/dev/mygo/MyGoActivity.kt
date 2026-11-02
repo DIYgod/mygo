@@ -23,6 +23,7 @@ class MyGoActivity : ComponentActivity() {
         HostImpl.restoring = HostImpl.restoring || savedInstanceState != null
         HostImpl.attach(this)
         HostImpl.applyBars()
+        holdSplash()
         val back = object : OnBackPressedCallback(false) {
             override fun handleOnBackPressed() {
                 // Back the app does not take leaves it running, as the
@@ -43,6 +44,23 @@ class MyGoActivity : ComponentActivity() {
         HostImpl.updateBack()
         HostImpl.startGo(this, intent)
         openIntent(intent)
+    }
+
+    /**
+     * The system's splash stays until the window first draws: holding that back
+     * until the app has drawn leaves no moment of an empty surface, black on a
+     * cold start. What shows no first frame goes on after a while.
+     */
+    private fun holdSplash() {
+        val content = findViewById<android.view.View>(android.R.id.content)
+        val until = android.os.SystemClock.uptimeMillis() + 4000
+        content.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (!HostImpl.drew && android.os.SystemClock.uptimeMillis() < until) return false
+                content.viewTreeObserver.removeOnPreDrawListener(this)
+                return true
+            }
+        })
     }
 
     override fun onNewIntent(intent: Intent) {

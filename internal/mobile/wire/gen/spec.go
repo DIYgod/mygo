@@ -48,6 +48,7 @@ var calls = []msg{
 			f("Parent", "int"), f("ViewType", "string"), f("ViewArgs", "string"),
 		},
 		reply: []field{f("Error", "string"), f("Layer", "int")}},
+	{name: "FirstFrame", doc: "the window's content presented its first frame", args: []field{f("ID", "int")}},
 	{name: "PlaceViews", doc: "where a surface shows the windows it holds (Parent), under it, in the order painted; the others hide. Places: encoded by Go (encodePlaces)",
 		args: []field{f("ID", "int"), f("Places", "bytes")}},
 	{name: "ShowWindow", args: []field{f("ID", "int")}},

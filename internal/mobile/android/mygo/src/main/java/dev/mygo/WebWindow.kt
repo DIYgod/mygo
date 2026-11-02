@@ -195,6 +195,10 @@ class WebWindow(context: Context, c: CreateWindowCall) : HostWindow(context, c.i
             reportState()
         }
 
+        override fun onPageCommitVisible(view: WebView, url: String) {
+            HostImpl.drew = true
+        }
+
         override fun onPageFinished(view: WebView, url: String) {
             reportState()
             Go.send(Event.loadFinished(id))

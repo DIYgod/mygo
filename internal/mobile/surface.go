@@ -283,6 +283,10 @@ func (s *surface) PlaceWebViews(views []platform.WebViewPlacement) {
 	s.w.b.call(&wire.PlaceViews{ID: s.w.id, Places: w.Buf}, nil)
 }
 
+// FirstFrame tells the host that there's something to show: Android holds its
+// splash until then, rather than showing a surface with nothing on it.
+func (s *surface) FirstFrame() { s.w.b.call(&wire.FirstFrame{ID: s.w.id}, nil) }
+
 // touch turns a finger, a pen or a mouse into pointer events: the first
 // finger is the pointer, a second pinches, and a tap soon after another
 // near it counts as a double tap.

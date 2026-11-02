@@ -11,81 +11,82 @@ const (
 	CallScreen                 = 5
 	CallLog                    = 6
 	CallCreateWindow           = 7
-	CallPlaceViews             = 8
-	CallShowWindow             = 9
-	CallHideWindow             = 10
-	CallCloseWindow            = 11
-	CallSetBackground          = 12
-	CallFocus                  = 13
-	CallSetTitle               = 14
-	CallCreateTabs             = 15
-	CallAddTab                 = 16
-	CallShowTabs               = 17
-	CallSelectTab              = 18
-	CallSetTabBadge            = 19
-	CallCloseTabs              = 20
-	CallPushWindow             = 21
-	CallPopWindow              = 22
-	CallLoadURL                = 23
-	CallLoadHTML               = 24
-	CallReload                 = 25
-	CallStopLoading            = 26
-	CallGoBack                 = 27
-	CallGoForward              = 28
-	CallEval                   = 29
-	CallCallAsync              = 30
-	CallSetZoom                = 31
-	CallSetUserAgent           = 32
-	CallSetUserScripts         = 33
-	CallCapturePage            = 34
-	CallUserAgent              = 35
-	CallSchemeRespond          = 36
-	CallSchemeData             = 37
-	CallSchemeFinish           = 38
-	CallSchemeFail             = 39
-	CallMessageBox             = 40
-	CallOpenFiles              = 41
-	CallShareFile              = 42
-	CallClipboardText          = 43
-	CallSetClipboardText       = 44
-	CallOpenURL                = 45
-	CallSecretGet              = 46
-	CallSecretSet              = 47
-	CallSecretDelete           = 48
-	CallNotify                 = 49
-	CallRemoveNotification     = 50
-	CallRemoveAllNotifications = 51
-	CallKeepAwake              = 52
-	CallNetworkStatus          = 53
-	CallWatchNetwork           = 54
-	CallBattery                = 55
-	CallSetSystemBars          = 56
-	CallSetOrientations        = 57
-	CallShare                  = 58
-	CallSaveFile               = 59
-	CallClipboardImage         = 60
-	CallSetClipboardImage      = 61
-	CallPopupMenu              = 62
-	CallSetBarItems            = 63
-	CallPluginCall             = 64
-	CallAudioOpen              = 65
-	CallAudioWrite             = 66
-	CallAudioClose             = 67
-	CallHaptic                 = 68
-	CallRequestFrame           = 69
-	CallSetTextInput           = 70
-	CallSetCursor              = 71
-	CallAccessibilityChanged   = 72
-	CallAnnounce               = 73
-	CallShowMenu               = 74
-	CallSetBackAvailable       = 75
-	CallShowMagnifier          = 76
-	CallHideMagnifier          = 77
-	CallTextMetrics            = 78
-	CallMeasureText            = 79
-	CallTextAdvances           = 80
-	CallDrawText               = 81
-	CallRegisterFont           = 82
+	CallFirstFrame             = 8
+	CallPlaceViews             = 9
+	CallShowWindow             = 10
+	CallHideWindow             = 11
+	CallCloseWindow            = 12
+	CallSetBackground          = 13
+	CallFocus                  = 14
+	CallSetTitle               = 15
+	CallCreateTabs             = 16
+	CallAddTab                 = 17
+	CallShowTabs               = 18
+	CallSelectTab              = 19
+	CallSetTabBadge            = 20
+	CallCloseTabs              = 21
+	CallPushWindow             = 22
+	CallPopWindow              = 23
+	CallLoadURL                = 24
+	CallLoadHTML               = 25
+	CallReload                 = 26
+	CallStopLoading            = 27
+	CallGoBack                 = 28
+	CallGoForward              = 29
+	CallEval                   = 30
+	CallCallAsync              = 31
+	CallSetZoom                = 32
+	CallSetUserAgent           = 33
+	CallSetUserScripts         = 34
+	CallCapturePage            = 35
+	CallUserAgent              = 36
+	CallSchemeRespond          = 37
+	CallSchemeData             = 38
+	CallSchemeFinish           = 39
+	CallSchemeFail             = 40
+	CallMessageBox             = 41
+	CallOpenFiles              = 42
+	CallShareFile              = 43
+	CallClipboardText          = 44
+	CallSetClipboardText       = 45
+	CallOpenURL                = 46
+	CallSecretGet              = 47
+	CallSecretSet              = 48
+	CallSecretDelete           = 49
+	CallNotify                 = 50
+	CallRemoveNotification     = 51
+	CallRemoveAllNotifications = 52
+	CallKeepAwake              = 53
+	CallNetworkStatus          = 54
+	CallWatchNetwork           = 55
+	CallBattery                = 56
+	CallSetSystemBars          = 57
+	CallSetOrientations        = 58
+	CallShare                  = 59
+	CallSaveFile               = 60
+	CallClipboardImage         = 61
+	CallSetClipboardImage      = 62
+	CallPopupMenu              = 63
+	CallSetBarItems            = 64
+	CallPluginCall             = 65
+	CallAudioOpen              = 66
+	CallAudioWrite             = 67
+	CallAudioClose             = 68
+	CallHaptic                 = 69
+	CallRequestFrame           = 70
+	CallSetTextInput           = 71
+	CallSetCursor              = 72
+	CallAccessibilityChanged   = 73
+	CallAnnounce               = 74
+	CallShowMenu               = 75
+	CallSetBackAvailable       = 76
+	CallShowMagnifier          = 77
+	CallHideMagnifier          = 78
+	CallTextMetrics            = 79
+	CallMeasureText            = 80
+	CallTextAdvances           = 81
+	CallDrawText               = 82
+	CallRegisterFont           = 83
 )
 
 // Numbers of events.
@@ -357,6 +358,19 @@ func (m *CreateWindowReply) Decode(r *Reader) {
 	m.Error = r.String()
 	m.Layer = r.Int()
 }
+
+// FirstFrame is the window's content presented its first frame.
+type FirstFrame struct {
+	ID int
+}
+
+func (m *FirstFrame) Encode(w *Writer) {
+	w.Uvarint(CallFirstFrame)
+	w.Int(m.ID)
+}
+
+// Wait reports whether the caller waits for the host to run it.
+func (*FirstFrame) Wait() bool { return false }
 
 // PlaceViews is where a surface shows the windows it holds (Parent), under it, in the order painted; the others hide. Places: encoded by Go (encodePlaces).
 type PlaceViews struct {

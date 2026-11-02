@@ -200,6 +200,13 @@ object HostImpl : HostCalls {
         return r
     }
 
+    /** Whether the app has something on screen, which the splash waits for. */
+    @Volatile var drew = false
+
+    override fun firstFrame(c: FirstFrameCall) {
+        drew = true
+    }
+
     override fun appInfo(): AppInfoReply {
         val r = AppInfoReply()
         val pm = app.packageManager

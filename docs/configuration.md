@@ -161,6 +161,10 @@ See [Linux](distribution.md#linux).
 | `distribution` | `"app-store"` | what the build is for: `app-store` (and TestFlight), `ad-hoc`, `development` or `enterprise` |
 | `buildNumber` | `version` | `CFBundleVersion`, which must grow with every upload of a version |
 | `orientations` | both | the orientations the app turns to on iPhones, `portrait` and `landscape`; iPads take every one |
+| `multipleWindows` | `false` | lets `WindowOptions.OwnScene` open windows of the system's own on iPad |
+| `associatedDomains` | | the hosts of universal links, as `example.com`, which reach `App.OnOpenURL`; the profile needs the capability Associated Domains |
+| `launchScreen` | | what shows as the app launches: `background`, a color, and `image`, a file |
+| `backgroundModes` | | the app's `UIBackgroundModes`, as `audio`, with those its plugins ask for |
 | `infoPlist` | | extra keys of Info.plist, which replace MyGo's own, as usage descriptions |
 
 ## android
@@ -172,6 +176,9 @@ See [Linux](distribution.md#linux).
 | `permissions` | | permissions the manifest declares besides INTERNET and notifications, as `CAMERA` |
 | `keystore` | the debug key | the keystore of the upload key that signs release builds, its passwords from `MYGO_ANDROID_KEYSTORE_PASSWORD` and `MYGO_ANDROID_KEY_PASSWORD` |
 | `keyAlias` | | the alias of the upload key in the keystore |
+| `appLinks` | | the domains the app opens links of, as `example.com` |
+| `adaptiveIcon` | | the launcher's icon, in layers: `foreground`, a square PNG, and `background`, a color |
+| `splash` | the theme's | the color that shows as the app launches, as `#102030` |
 
 See [Phones and tablets](mobile.md).
 

@@ -211,6 +211,14 @@ public struct CreateWindowReply {
     }
 }
 
+public struct FirstFrameCall {
+    public var id: Int = 0
+    public init() {}
+    init(_ r: inout WireReader) {
+        id = r.int()
+    }
+}
+
 public struct PlaceViewsCall {
     public var id: Int = 0
     public var places: [UInt8] = []
@@ -1179,6 +1187,8 @@ public protocol HostCalls: AnyObject {
     func log(_ c: LogCall)
     /// the screen's content: a web view, or a surface for native UI
     func createWindow(_ c: CreateWindowCall) -> CreateWindowReply
+    /// the window's content presented its first frame
+    func firstFrame(_ c: FirstFrameCall)
     /// where a surface shows the windows it holds (Parent), under it, in the order painted; the others hide. Places: encoded by Go (encodePlaces)
     func placeViews(_ c: PlaceViewsCall)
     func showWindow(_ c: ShowWindowCall)
@@ -1319,228 +1329,231 @@ public func dispatchCall(_ h: HostCalls, _ buf: UnsafeRawBufferPointer) -> [UInt
         h.createWindow(CreateWindowCall(&r)).encode(&w)
         return w.buf
     case 8:
-        h.placeViews(PlaceViewsCall(&r))
+        h.firstFrame(FirstFrameCall(&r))
         return nil
     case 9:
-        h.showWindow(ShowWindowCall(&r))
+        h.placeViews(PlaceViewsCall(&r))
         return nil
     case 10:
-        h.hideWindow(HideWindowCall(&r))
+        h.showWindow(ShowWindowCall(&r))
         return nil
     case 11:
-        h.closeWindow(CloseWindowCall(&r))
+        h.hideWindow(HideWindowCall(&r))
         return nil
     case 12:
-        h.setBackground(SetBackgroundCall(&r))
+        h.closeWindow(CloseWindowCall(&r))
         return nil
     case 13:
-        h.focus(FocusCall(&r))
+        h.setBackground(SetBackgroundCall(&r))
         return nil
     case 14:
-        h.setTitle(SetTitleCall(&r))
+        h.focus(FocusCall(&r))
         return nil
     case 15:
-        h.createTabs(CreateTabsCall(&r))
+        h.setTitle(SetTitleCall(&r))
         return nil
     case 16:
-        h.addTab(AddTabCall(&r))
+        h.createTabs(CreateTabsCall(&r))
         return nil
     case 17:
-        h.showTabs(ShowTabsCall(&r))
+        h.addTab(AddTabCall(&r))
         return nil
     case 18:
-        h.selectTab(SelectTabCall(&r))
+        h.showTabs(ShowTabsCall(&r))
         return nil
     case 19:
-        h.setTabBadge(SetTabBadgeCall(&r))
+        h.selectTab(SelectTabCall(&r))
         return nil
     case 20:
-        h.closeTabs(CloseTabsCall(&r))
+        h.setTabBadge(SetTabBadgeCall(&r))
         return nil
     case 21:
-        h.pushWindow(PushWindowCall(&r))
+        h.closeTabs(CloseTabsCall(&r))
         return nil
     case 22:
-        h.popWindow(PopWindowCall(&r))
+        h.pushWindow(PushWindowCall(&r))
         return nil
     case 23:
-        h.loadURL(LoadURLCall(&r))
+        h.popWindow(PopWindowCall(&r))
         return nil
     case 24:
-        h.loadHTML(LoadHTMLCall(&r))
+        h.loadURL(LoadURLCall(&r))
         return nil
     case 25:
-        h.reload(ReloadCall(&r))
+        h.loadHTML(LoadHTMLCall(&r))
         return nil
     case 26:
-        h.stopLoading(StopLoadingCall(&r))
+        h.reload(ReloadCall(&r))
         return nil
     case 27:
-        h.goBack(GoBackCall(&r))
+        h.stopLoading(StopLoadingCall(&r))
         return nil
     case 28:
-        h.goForward(GoForwardCall(&r))
+        h.goBack(GoBackCall(&r))
         return nil
     case 29:
-        h.eval(EvalCall(&r))
+        h.goForward(GoForwardCall(&r))
         return nil
     case 30:
-        h.callAsync(CallAsyncCall(&r))
+        h.eval(EvalCall(&r))
         return nil
     case 31:
-        h.setZoom(SetZoomCall(&r))
+        h.callAsync(CallAsyncCall(&r))
         return nil
     case 32:
-        h.setUserAgent(SetUserAgentCall(&r))
+        h.setZoom(SetZoomCall(&r))
         return nil
     case 33:
-        h.setUserScripts(SetUserScriptsCall(&r))
+        h.setUserAgent(SetUserAgentCall(&r))
         return nil
     case 34:
-        h.capturePage(CapturePageCall(&r))
+        h.setUserScripts(SetUserScriptsCall(&r))
         return nil
     case 35:
+        h.capturePage(CapturePageCall(&r))
+        return nil
+    case 36:
         h.userAgent(UserAgentCall(&r)).encode(&w)
         return w.buf
-    case 36:
+    case 37:
         h.schemeRespond(SchemeRespondCall(&r))
         return nil
-    case 37:
+    case 38:
         h.schemeData(SchemeDataCall(&r))
         return nil
-    case 38:
+    case 39:
         h.schemeFinish(SchemeFinishCall(&r))
         return nil
-    case 39:
+    case 40:
         h.schemeFail(SchemeFailCall(&r))
         return nil
-    case 40:
+    case 41:
         h.messageBox(MessageBoxCall(&r))
         return nil
-    case 41:
+    case 42:
         h.openFiles(OpenFilesCall(&r))
         return nil
-    case 42:
+    case 43:
         h.shareFile(ShareFileCall(&r))
         return nil
-    case 43:
+    case 44:
         h.clipboardText().encode(&w)
         return w.buf
-    case 44:
+    case 45:
         h.setClipboardText(SetClipboardTextCall(&r))
         return nil
-    case 45:
+    case 46:
         h.openURL(OpenURLCall(&r)).encode(&w)
         return w.buf
-    case 46:
+    case 47:
         h.secretGet(SecretGetCall(&r)).encode(&w)
         return w.buf
-    case 47:
+    case 48:
         h.secretSet(SecretSetCall(&r)).encode(&w)
         return w.buf
-    case 48:
+    case 49:
         h.secretDelete(SecretDeleteCall(&r)).encode(&w)
         return w.buf
-    case 49:
+    case 50:
         h.notify(NotifyCall(&r))
         return nil
-    case 50:
+    case 51:
         h.removeNotification(RemoveNotificationCall(&r))
         return nil
-    case 51:
+    case 52:
         h.removeAllNotifications()
         return nil
-    case 52:
+    case 53:
         h.keepAwake(KeepAwakeCall(&r))
         return nil
-    case 53:
+    case 54:
         h.networkStatus().encode(&w)
         return w.buf
-    case 54:
+    case 55:
         h.watchNetwork()
         return nil
-    case 55:
+    case 56:
         h.battery().encode(&w)
         return w.buf
-    case 56:
+    case 57:
         h.setSystemBars(SetSystemBarsCall(&r))
         return nil
-    case 57:
+    case 58:
         h.setOrientations(SetOrientationsCall(&r))
         return nil
-    case 58:
+    case 59:
         h.share(ShareCall(&r))
         return nil
-    case 59:
+    case 60:
         h.saveFile(SaveFileCall(&r))
         return nil
-    case 60:
+    case 61:
         h.clipboardImage().encode(&w)
         return w.buf
-    case 61:
+    case 62:
         h.setClipboardImage(SetClipboardImageCall(&r))
         return nil
-    case 62:
+    case 63:
         h.popupMenu(PopupMenuCall(&r))
         return nil
-    case 63:
+    case 64:
         h.setBarItems(SetBarItemsCall(&r))
         return nil
-    case 64:
+    case 65:
         h.pluginCall(PluginCallCall(&r))
         return nil
-    case 65:
+    case 66:
         h.audioOpen(AudioOpenCall(&r)).encode(&w)
         return w.buf
-    case 66:
+    case 67:
         h.audioWrite(AudioWriteCall(&r)).encode(&w)
         return w.buf
-    case 67:
+    case 68:
         h.audioClose().encode(&w)
         return w.buf
-    case 68:
+    case 69:
         h.haptic(HapticCall(&r))
         return nil
-    case 69:
+    case 70:
         h.requestFrame(RequestFrameCall(&r))
         return nil
-    case 70:
+    case 71:
         h.setTextInput(SetTextInputCall(&r))
         return nil
-    case 71:
+    case 72:
         h.setCursor(SetCursorCall(&r))
         return nil
-    case 72:
+    case 73:
         h.accessibilityChanged(AccessibilityChangedCall(&r))
         return nil
-    case 73:
+    case 74:
         h.announce(AnnounceCall(&r))
         return nil
-    case 74:
+    case 75:
         h.showMenu(ShowMenuCall(&r))
         return nil
-    case 75:
+    case 76:
         h.setBackAvailable(SetBackAvailableCall(&r))
         return nil
-    case 76:
+    case 77:
         h.showMagnifier(ShowMagnifierCall(&r))
         return nil
-    case 77:
+    case 78:
         h.hideMagnifier(HideMagnifierCall(&r))
         return nil
-    case 78:
+    case 79:
         h.textMetrics(TextMetricsCall(&r)).encode(&w)
         return w.buf
-    case 79:
+    case 80:
         h.measureText(MeasureTextCall(&r)).encode(&w)
         return w.buf
-    case 80:
+    case 81:
         h.textAdvances(TextAdvancesCall(&r)).encode(&w)
         return w.buf
-    case 81:
+    case 82:
         h.drawText(DrawTextCall(&r)).encode(&w)
         return w.buf
-    case 82:
+    case 83:
         h.registerFont(RegisterFontCall(&r)).encode(&w)
         return w.buf
     default:
