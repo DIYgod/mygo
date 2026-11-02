@@ -32,6 +32,12 @@ var (
 	touchBars   func(s *state, rt *engine) float32
 	// refreshPainter draws a pull to refresh, which PullToRefresh sets.
 	refreshPainter func(p *Painter, e *node)
+	// devAttach starts keeping a window's state under mygo dev (devstate.go),
+	// and the others take it back, as elements and routers come.
+	devAttach      func(h *windowHost)
+	restoreElement func(rt *engine, s *state)
+	restoreLocal   func(s *state, key, v any)
+	noteRouter     func(r *Router, e *node)
 	// contentStretch transforms what a scroll container holds, on Android.
 	contentStretch func(world scene.Affine, e *node) scene.Affine
 	// insetRoot keeps the content out from under what covers the

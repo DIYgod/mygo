@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/egoist/mygo/internal/keepstate"
 	"github.com/egoist/mygo/internal/platform"
 )
 
@@ -21,7 +22,7 @@ func restorationFile() (string, error) {
 
 // inDevelopment reports whether mygo dev runs the app, which it restarts as the
 // code changes: the app comes back as it was, as hot restart keeps it.
-func inDevelopment() bool { return os.Getenv("MYGO_DEV") != "" }
+func inDevelopment() bool { return launchedByDev() }
 
 // keepStateInDevelopment keeps what the app gives every second, as mygo dev ends
 // the app without a word.
@@ -87,4 +88,34 @@ func restoredState() []byte {
 	}
 	os.Remove(path)
 	return data
+}
+
+// KeepState has the app come back with v as it was, across the restarts of mygo
+// dev and as the system ends the app in the background: v, a pointer, is written
+// down whole as it goes, unexported fields and all, and read back as the app is
+// ready. Call it before App.WhenReady opens the windows, once:
+//
+//	a := &app{tab: 0}
+//	mygo.KeepState(a)
+//
+// It keeps data. Functions, channels, interfaces, the standard library's structs
+// but time.Time, and pointers to other packages' types stay as the program makes
+// them. What the change of the code gave another type stays as made. On the main
+// thread, as views change v, so that no lock is needed; for more control, use
+// OnSaveState and RestoredState.
+//
+// A function, not a method of App, so that apps that don't use it don't have it.
+func KeepState(v any) {
+	App.OnSaveState(func() []byte {
+		data, err := keepstate.Encode(v)
+		if err != nil {
+			return nil
+		}
+		return data
+	})
+	App.WhenReady(func() {
+		if data := App.RestoredState(); data != nil {
+			keepstate.Decode(data, v)
+		}
+	})
 }

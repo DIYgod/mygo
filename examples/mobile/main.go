@@ -585,6 +585,8 @@ func main() {
 		return preferences.Set("background runs", n+1)
 	})
 	a := &app{wifi: true, when: time.Now(), results: map[string]string{}}
+	// Back as it was after each reload of mygo dev, and when the system ended it.
+	mygo.KeepState(a)
 	for i := range 30 {
 		a.rows = append(a.rows, fmt.Sprintf("Row %d", i+1))
 	}

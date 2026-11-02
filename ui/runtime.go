@@ -407,6 +407,7 @@ type engine struct {
 	// bouncing lists the containers springing back from past their ends, and
 	// bounceAt is when they last moved; barsFadeAt until when indicators show.
 	bouncing   []uint64
+	dev        *devState
 	caught     []uint64
 	bounceAt   time.Time
 	barsFadeAt time.Time

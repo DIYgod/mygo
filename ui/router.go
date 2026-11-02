@@ -528,6 +528,9 @@ func (r *Router) coreView(c *context, fn func(r *Route)) *node {
 	box := coreColumn(c).Grow(1).AlignSelf(Stretch).MinWidth(0).MinHeight(0)
 	box.widget = "Router"
 	wrapElement(box).Bind(&r.Handle)
+	if noteRouter != nil {
+		noteRouter(r, box)
+	}
 	r.keys(c, box)
 	if touchFrame != nil && c.routers == 1 {
 		r.noteBack(c)

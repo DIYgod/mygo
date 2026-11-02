@@ -79,11 +79,21 @@ Android the new library goes to the debuggable app without Gradle. A change of
 the host, a plugin, the resources or the configuration builds and installs the
 whole app again.
 
-Restarting loses what the app holds in memory. An app that gives
-`App.OnSaveState` what it needs, which it should for the system ending it in the
-background anyway, finds it in `App.RestoredState` as it comes back: under `mygo
-dev`, on desktops too, it is kept every second, and development restarts where
-it was.
+Go can't swap code in a running program, so a change restarts the app, and the
+app comes back where it was. Scroll offsets, where a `ui.Router` is and what
+widgets keep with `ui.Local` return by themselves. One line brings back the app's
+own values, unexported fields and all, with no tags or methods on its types:
+
+```go
+a := &app{tab: 0}
+mygo.KeepState(a)
+```
+
+It also brings the app back as the system ended it in the background. It keeps
+data: functions, channels, interfaces and pointers to other packages' types stay
+as the program makes them, and a field whose type the change altered stays as
+made. `App.OnSaveState` and `App.RestoredState` are there for more control. All
+of it works under `mygo dev` on desktops too.
 
 The development app is "<name> Dev" with the identifier
 "<identifier>.dev", as on the desktop, so it installs beside the release.

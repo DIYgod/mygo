@@ -604,6 +604,9 @@ func coreLocal[T any](e *node, key any, init func() T) *T {
 	}
 	v := new(T)
 	*v = init()
+	if restoreLocal != nil {
+		restoreLocal(st, key, v)
+	}
 	st.locals[key] = v
 	return v
 }
@@ -836,6 +839,10 @@ func (rt *engine) lookState(id uint64) (s *state, built bool) {
 			s = &state{id: id, born: rt.frame}
 		}
 		rt.states[id] = s
+		if restoreElement != nil {
+			s.rt = rt
+			restoreElement(rt, s)
+		}
 	} else {
 		built = s.seen == rt.frame && s.pass == rt.pass
 	}

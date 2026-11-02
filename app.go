@@ -93,6 +93,7 @@ func (a *Application) Run() error {
 	if out := os.Getenv("MYGO_GENERATE"); out != "" {
 		return writeClient(out)
 	}
+	takeDevMarker()
 	if !isMainThread() {
 		return errors.New("mygo: App.Run must be called from the main goroutine")
 	}
@@ -692,9 +693,9 @@ func (appHandler) ThemeChanged() {
 	// media queries do not tell them.
 	sendPreferences()
 }
-func (appHandler) MemoryWarning()                { fire(&App.onMemoryWarning) }
-func (appHandler) DisplaysChanged()              { Screen.changed() }
-func (appHandler) LocaleChanged()                { App.localeChangedFromSystem() }
+func (appHandler) MemoryWarning()   { fire(&App.onMemoryWarning) }
+func (appHandler) DisplaysChanged() { Screen.changed() }
+func (appHandler) LocaleChanged()   { App.localeChangedFromSystem() }
 func (appHandler) PowerEvent(event string) {
 	if event == "suspend" {
 		App.writeState()

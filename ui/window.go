@@ -101,6 +101,9 @@ func (v *Content) AttachContent(conn *surface.Conn) {
 	h.uiFont()
 	h.textLanguage()
 	h.automate()
+	if devAttach != nil {
+		devAttach(h)
+	}
 	// Load the fonts while the window shows up.
 	go text.Shared().Preload()
 	h.requestFrame()
