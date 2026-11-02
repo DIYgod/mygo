@@ -84,7 +84,7 @@ func (rt *engine) buildInspector(c *context, appW, w, h float32) {
 	// developer tools do.
 	panel := coreColumn(c).Key(inspectorKey).Direction(LeftToRight)
 	in.panel = panel.id
-	if w < inspectorNarrow {
+	if inspectorBelow(w) {
 		// Along the bottom of a phone, its toolbar's height for a finger.
 		panel.Absolute().Left(0).Top(in.appH).Width(w).Height(h-in.appH).BorderWidth(1, 0, 0, 0)
 	} else {

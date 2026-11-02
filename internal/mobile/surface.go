@@ -346,6 +346,8 @@ func (s *surface) touch(e *wire.TouchEvent) {
 		delete(s.fingers, e.Pointer)
 		if len(s.fingers) < 2 {
 			s.pinchDist = 0
+		} else if len(s.fingers) == 2 {
+			s.pinchDist = s.spread() // from where the two left are now
 		}
 		if !s.touching || e.Pointer != s.primary {
 			return

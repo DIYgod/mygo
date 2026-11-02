@@ -10,6 +10,10 @@ import (
 	"github.com/egoist/mygo/internal/scene"
 )
 
+func init() {
+	ownModule = "this test's types are an app's" // not the framework's world
+}
+
 type inner struct {
 	Name  string
 	count int
@@ -117,6 +121,25 @@ func TestCodeChanged(t *testing.T) {
 	}
 }
 
+// A pointer of the framework leads nowhere, whatever it holds: a widget's state
+// may hold a handle that reaches all of a window's elements.
+func TestFrameworkPointers(t *testing.T) {
+	defer func(m string) { ownModule = m }(ownModule)
+	ownModule = "github.com/egoist/mygo"
+	a := &inner{Name: "x"}
+	type holder struct {
+		in  *inner
+		img *scene.Image
+	}
+	data, err := Encode(&holder{in: a, img: &scene.Image{W: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "{}" {
+		t.Errorf("wrote %s", data)
+	}
+}
+
 // A cycle ends.
 func TestCycle(t *testing.T) {
 	type node struct {
@@ -165,5 +188,134 @@ func TestScalar(t *testing.T) {
 	var m int
 	if err := Decode(data, &m); err != nil || m != 42 {
 		t.Errorf("%d, %v", m, err)
+	}
+}
+
+// What holds many ways to the same values stays quick and small.
+func TestSharedPointers(t *testing.T) {
+	type node struct {
+		prev, next *node
+		n          int
+	}
+	var first, last *node
+	for i := range 200 {
+		x := &node{n: i, prev: last}
+		if last != nil {
+			last.next = x
+		} else {
+			first = x
+		}
+		last = x
+	}
+	data, err := Encode(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > 200*64 {
+		t.Errorf("%d bytes for 200 nodes", len(data))
+	}
+	var back node
+	if err := Decode(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for x := &back; x != nil; x = x.next {
+		if x.n != n {
+			t.Fatalf("node %d says %d", n, x.n)
+		}
+		n++
+	}
+	if n != 200 {
+		t.Errorf("%d of 200 nodes", n)
+	}
+}
+
+// A time inside a map's struct, whose values can't be addressed.
+func TestTimeInMap(t *testing.T) {
+	type todo struct{ created time.Time }
+	type state struct {
+		exported map[string]todo
+		ptr      map[string]*todo
+	}
+	when := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	a := state{exported: map[string]todo{"a": {when}}, ptr: map[string]*todo{"b": {when}}}
+	data, err := Encode(&a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var b state
+	if err := Decode(data, &b); err != nil {
+		t.Fatal(err)
+	}
+	if !b.exported["a"].created.Equal(when) || b.ptr["b"] == nil || !b.ptr["b"].created.Equal(when) {
+		t.Errorf("%v %v", b.exported, b.ptr)
+	}
+}
+
+// A collection of what can't come back whole stays as the program made it, rather
+// than coming back with holes.
+func TestCollectionsStayWhole(t *testing.T) {
+	type row struct {
+		name string
+		fn   func() int
+	}
+	type state struct {
+		rows    []row
+		byName  map[string]row
+		any     []any
+		foreign []*scene.Image
+		kept    []string
+	}
+	img := &scene.Image{W: 3}
+	fn := func() int { return 7 }
+	a := state{rows: []row{{"a", fn}, {"b", fn}}, kept: []string{"x"}}
+	data, err := Encode(&a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := state{
+		rows: []row{{"made", fn}}, byName: map[string]row{"m": {"made", fn}},
+		any: []any{1}, foreign: []*scene.Image{img},
+	}
+	if err := Decode(data, &b); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.rows) != 1 || b.rows[0].name != "made" || b.rows[0].fn() != 7 || b.byName["m"].fn == nil {
+		t.Errorf("rows: %+v", b.rows)
+	}
+	if len(b.any) != 1 || b.foreign[0] != img {
+		t.Errorf("any %v, foreign %v", b.any, b.foreign)
+	}
+	if len(b.kept) != 1 || b.kept[0] != "x" {
+		t.Errorf("kept: %v", b.kept)
+	}
+}
+
+// Nil is a value: what the app emptied stays empty, whatever it starts with.
+func TestNilComesBack(t *testing.T) {
+	type state struct {
+		items []string
+		names map[string]int
+		next  *int
+	}
+	data, err := Encode(&state{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	one := 1
+	b := state{items: []string{"seed"}, names: map[string]int{"seed": 1}, next: &one}
+	if err := Decode(data, &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.items != nil || b.names != nil || b.next != nil {
+		t.Errorf("%+v", b)
+	}
+}
+
+// Too much to write every second is an error, not a stall.
+func TestTooLarge(t *testing.T) {
+	big := make([]int, maxNodes+10)
+	if _, err := Encode(&big); err == nil {
+		t.Error("no error")
 	}
 }

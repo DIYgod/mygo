@@ -130,7 +130,7 @@ func (m *Map) OnMarkerTap(fn func(id string)) {
 	}))
 }
 
-// Destroy takes the map away.
+// Destroy takes the map away, which closing its window doesn't: call it before.
 func (m *Map) Destroy() {
 	for _, off := range m.offs {
 		off()

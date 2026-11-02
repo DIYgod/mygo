@@ -506,9 +506,11 @@ func (a *Application) OnSaveState(fn func() []byte) {
 	a.keepStateInDevelopment()
 }
 
-// RestoredState returns what OnSaveState gave as the system ended the app in
-// the background, nil after any other way of ending: Android tells when the user
-// meant to leave, and iOS keeps it unless the user force-quit.
+// RestoredState returns what OnSaveState gave as the app went to the background,
+// if the system ended it there. Android tells when the user meant to leave, which
+// gives nil. iOS doesn't say by the time the app starts: an app the user force-quit
+// from the background gets it too. An end while the app is on screen, as a crash,
+// gives nil.
 func (a *Application) RestoredState() []byte { return restoredState() }
 
 // OnMemoryWarning is called on the main thread when the system is short of
@@ -697,8 +699,11 @@ func (appHandler) MemoryWarning()   { fire(&App.onMemoryWarning) }
 func (appHandler) DisplaysChanged() { Screen.changed() }
 func (appHandler) LocaleChanged()   { App.localeChangedFromSystem() }
 func (appHandler) PowerEvent(event string) {
-	if event == "suspend" {
+	switch event {
+	case "suspend":
 		App.writeState()
+	case "resume":
+		forgetKeptState()
 	}
 	Power.event(event)
 }

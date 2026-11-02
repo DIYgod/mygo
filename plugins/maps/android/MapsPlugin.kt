@@ -80,7 +80,10 @@ class MapsPlugin : MyGoPlugin {
             }
             "addMarker" -> {
                 val name = args.optString("marker")
-                h.pins.remove(name)?.let { h.map.overlays.remove(it) }
+                h.pins.remove(name)?.let {
+                    it.closeInfoWindow()
+                    h.map.overlays.remove(it)
+                }
                 val m = Marker(h.map)
                 m.position = at
                 m.title = args.optString("title").ifEmpty { null }
@@ -97,7 +100,10 @@ class MapsPlugin : MyGoPlugin {
                 reply.success(null)
             }
             "removeMarker" -> {
-                h.pins.remove(args.optString("marker"))?.let { h.map.overlays.remove(it) }
+                h.pins.remove(args.optString("marker"))?.let {
+                    it.closeInfoWindow()
+                    h.map.overlays.remove(it)
+                }
                 h.map.invalidate()
                 reply.success(null)
             }

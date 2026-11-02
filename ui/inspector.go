@@ -156,22 +156,30 @@ func (in *inspector) contentWidth(w float32) float32 {
 	if in.width == 0 {
 		in.width = inspectorWidth
 	}
-	if w < inspectorNarrow {
-		in.appW = w // below, on a phone
+	if inspectorBelow(w) {
+		in.appW = w
 		return w
 	}
 	pw := min(max(in.width, 260), w-160)
+	if w < inspectorNarrow {
+		pw = w / 2
+	}
 	in.appW = max(w-pw, 0)
 	return in.appW
 }
 
-// inspectorNarrow is the width of a window below which the panel docks along the
-// bottom, as side by side neither would be of use.
+// inspectorNarrow is the width of a window below which the panel takes half.
 const inspectorNarrow = 520
+
+// inspectorBelow says whether the panel docks along the window's bottom: on a
+// phone's narrow screen, where neither half of it side by side would be of use.
+func inspectorBelow(w float32) bool {
+	return w < inspectorNarrow && (runtime.GOOS == "ios" || runtime.GOOS == "android")
+}
 
 // contentHeight returns the height the window w×h leaves the content.
 func (in *inspector) contentHeight(w, h float32) float32 {
-	if !in.open || w >= inspectorNarrow {
+	if !in.open || !inspectorBelow(w) {
 		in.appH = h
 		return h
 	}

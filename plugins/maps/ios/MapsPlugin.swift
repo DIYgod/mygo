@@ -19,17 +19,27 @@ private final class MapHolder: NSObject, MKMapViewDelegate, UIGestureRecognizerD
     var pins: [String: Pin] = [:]
     /// What to show once the view has a size.
     var pending: (CLLocationCoordinate2D, Double)?
+    /// The pin selected by the tap being handled, which has told already.
+    weak var justSelected: Pin?
 
     init(id: Int) {
         self.id = id
         super.init()
         map.delegate = self
+        // A tap once a double tap, which zooms, is ruled out.
+        let twice = UITapGestureRecognizer()
+        twice.numberOfTapsRequired = 2
+        twice.delegate = self
+        map.addGestureRecognizer(twice)
         let tap = UITapGestureRecognizer(target: self, action: #selector(tapped(_:)))
         tap.delegate = self
+        tap.require(toFail: twice)
         map.addGestureRecognizer(tap)
     }
 
-    func show(_ at: CLLocationCoordinate2D, zoom: Double, animated: Bool) {
+    func show(_ place: CLLocationCoordinate2D, zoom: Double, animated: Bool) {
+        // MapKit raises on what's off its map.
+        let at = CLLocationCoordinate2D(latitude: max(-85, min(85, place.latitude)), longitude: max(-180, min(180, place.longitude)))
         guard map.bounds.width > 0 else {
             pending = (at, zoom)
             return
@@ -41,8 +51,16 @@ private final class MapHolder: NSObject, MKMapViewDelegate, UIGestureRecognizerD
 
     @objc func tapped(_ g: UITapGestureRecognizer) {
         let p = g.location(in: map)
-        // A pin's own tap, not the map's.
-        if map.selectedAnnotations.first != nil || map.hitTest(p, with: nil) is MKAnnotationView { return }
+        // A pin's own tap, not the map's: mapView(_:didSelect:) tells of its first,
+        // and this of those while it stays selected.
+        var v = map.hitTest(p, with: nil)
+        while let view = v, !(view is MKAnnotationView) { v = view.superview }
+        if let pin = (v as? MKAnnotationView)?.annotation as? Pin {
+            if justSelected !== pin { PluginHost.emit("maps", "markerTap", ["id": id, "marker": pin.id]) }
+            justSelected = nil
+            return
+        }
+        justSelected = nil
         let at = map.convert(p, toCoordinateFrom: map)
         PluginHost.emit("maps", "tap", ["id": id, "lat": at.latitude, "lng": at.longitude])
     }
@@ -56,6 +74,7 @@ private final class MapHolder: NSObject, MKMapViewDelegate, UIGestureRecognizerD
 
     func mapView(_ m: MKMapView, didSelect annotation: MKAnnotation) {
         if let pin = annotation as? Pin {
+            justSelected = pin
             PluginHost.emit("maps", "markerTap", ["id": id, "marker": pin.id])
         }
     }

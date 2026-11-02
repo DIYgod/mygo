@@ -75,6 +75,10 @@ func (b *Backend) PluginCall(plugin, method string, args []byte, done func([]byt
 
 func (b *Backend) OnPluginEvent(fn func(plugin, name string, data []byte)) { b.pluginEvents = fn }
 
+// StartedHidden reports whether the system started the app for something in the
+// background, and it hasn't shown yet.
+func (b *Backend) StartedHidden() bool { return b.startedHidden }
+
 // WasEndedBySystem reports whether this launch follows the system ending the
 // app, rather than the user.
 func (b *Backend) WasEndedBySystem() bool { return b.appInfo().Restoring }

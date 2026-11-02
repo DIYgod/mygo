@@ -3,6 +3,7 @@
 package ui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -38,6 +39,11 @@ type keptElement struct {
 type keptRouter struct {
 	Locs []string `json:"locs"`
 	At   int      `json:"at"`
+	// Pages are each entry's, which its elements' identities come from, and
+	// Next the number the router's next page takes.
+	Pages   [][]uint64 `json:"pages"`
+	Layouts [][]int    `json:"layouts"`
+	Next    uint64     `json:"next"`
 }
 
 // keptWindow is what a window writes down.
@@ -85,31 +91,31 @@ func attachDevState(h *windowHost) {
 		return
 	}
 	go func() {
+		// A window closed drops what's posted to it, which ends this.
+		var waiting atomic.Int32
 		for range time.Tick(devStateEvery) {
-			done := make(chan []byte, 1)
+			if waiting.Add(1) > 16 {
+				return
+			}
 			h.conn.Post(func() {
+				waiting.Store(0)
 				if rt.closed {
-					done <- nil
 					return
 				}
-				done <- rt.keptNow()
+				data := rt.keptNow()
+				if data == nil || bytes.Equal(data, last) {
+					return
+				}
+				last = data
+				// Off the main thread, whole or not at all, as the end comes
+				// without a word.
+				go func() {
+					tmp := path + ".tmp"
+					if os.WriteFile(tmp, data, 0o600) == nil {
+						os.Rename(tmp, path)
+					}
+				}()
 			})
-			data := <-done
-			if data == nil {
-				if rt.closed {
-					return
-				}
-				continue
-			}
-			if string(data) == string(last) {
-				continue
-			}
-			last = data
-			// Whole or not at all, as the end comes without a word.
-			tmp := path + ".tmp"
-			if os.WriteFile(tmp, data, 0o600) == nil {
-				os.Rename(tmp, path)
-			}
 		}
 	}()
 }
@@ -157,9 +163,11 @@ func (rt *engine) keptNow() []byte {
 	if len(rt.dev.routers) > 0 {
 		k.Routers = map[string]*keptRouter{}
 		for id, r := range rt.dev.routers {
-			kr := &keptRouter{At: r.at}
+			kr := &keptRouter{At: r.at, Next: r.pages}
 			for _, e := range r.entries {
 				kr.Locs = append(kr.Locs, e.loc)
+				kr.Pages = append(kr.Pages, e.pages)
+				kr.Layouts = append(kr.Layouts, e.layouts)
 			}
 			k.Routers[strconv.FormatUint(id, 10)] = kr
 		}
@@ -190,8 +198,10 @@ func keptElementFor(rt *engine, s *state) {
 	if rt.dev == nil || rt.dev.kept == nil {
 		return
 	}
+	// Taken once: an element made again later starts as any.
 	if e := rt.dev.kept.Elements[strconv.FormatUint(s.id, 10)]; e != nil {
 		s.scrollX, s.scrollY = e.X, e.Y
+		e.X, e.Y = 0, 0
 	}
 }
 
@@ -208,8 +218,9 @@ func keptLocalFor(s *state, key, v any) {
 	if e == nil || e.Locals[name] == nil {
 		return
 	}
-	defer func() { recover() }() // what no longer fits stays as made
-	keepstate.Decode(e.Locals[name], v)
+	data := e.Locals[name]
+	delete(e.Locals, name) // taken once
+	keepstate.Decode(data, v)
 }
 
 // noteDevRouter brings a router back to where it was, the first time it shows.
@@ -228,9 +239,14 @@ func noteDevRouter(r *Router, e *node) {
 	}
 	if k := rt.dev.kept.Routers[strconv.FormatUint(id, 10)]; k != nil && len(k.Locs) > 0 && k.At >= 0 && k.At < len(k.Locs) {
 		r.entries = r.entries[:0]
-		for _, loc := range k.Locs {
-			r.entries = append(r.entries, &routeEntry{loc: loc})
+		for i, loc := range k.Locs {
+			entry := &routeEntry{loc: loc}
+			if i < len(k.Pages) && i < len(k.Layouts) {
+				entry.pages, entry.layouts = k.Pages[i], k.Layouts[i]
+			}
+			r.entries = append(r.entries, entry)
 		}
-		r.at = k.At
+		r.at, r.pages = k.At, k.Next
+		delete(rt.dev.kept.Routers, strconv.FormatUint(id, 10)) // taken once
 	}
 }

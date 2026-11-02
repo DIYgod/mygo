@@ -97,21 +97,32 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         PluginHost.applicationEvent(.pushError(error))
     }
 
+    func application(_ application: UIApplication, didDiscardSceneSessions sessions: Set<UISceneSession>) {
+        Scenes.discarded(sessions)
+    }
+
     func applicationDidReceiveMemoryWarning(_ application: UIApplication) { Go.send(Event.memoryWarning()) }
     func applicationWillTerminate(_ application: UIApplication) { Go.ask(Event.terminating()) }
 }
 
 /// The windows of their own scenes, on iPad (WindowOptions.OwnScene): a scene
-/// asked for with the window's number, in which it's the whole content.
+/// asked for with the window's number, in which it's the whole content. iOS may
+/// disconnect a scene in the background and connect it again, keeping its session,
+/// which keeps the window; the window closes as the session goes.
 enum Scenes {
     static let activity = "dev.mygo.window"
     static var sessions: [Int: UISceneSession] = [:]
+    /// Those asked for that haven't connected, and those of them no longer wanted.
+    static var pending = Set<Int>()
+    static var unwanted = Set<Int>()
 
     static var available: Bool {
         UIDevice.current.userInterfaceIdiom == .pad && UIApplication.shared.supportsMultipleScenes
     }
 
     static func open(_ w: HostWindow) {
+        unwanted.remove(w.id)
+        if pending.contains(w.id) { return }
         let request: UISceneSessionActivationRequest
         if let s = sessions[w.id] {
             request = UISceneSessionActivationRequest(session: s)
@@ -119,13 +130,16 @@ enum Scenes {
             let a = NSUserActivity(activityType: activity)
             a.userInfo = ["window": w.id]
             request = UISceneSessionActivationRequest(role: .windowApplication, userActivity: a)
+            pending.insert(w.id)
         }
         UIApplication.shared.activateSceneSession(for: request) { error in
+            pending.remove(w.id)
             FileHandle.standardError.write(Data("mygo: opening a window: \(error)\n".utf8))
         }
     }
 
     static func close(_ id: Int) {
+        if pending.contains(id) { unwanted.insert(id) }
         guard let s = sessions.removeValue(forKey: id) else { return }
         // Back to the app's first, rather than out of the app, where iPadOS would
         // go from the only window on screen.
@@ -133,6 +147,15 @@ enum Scenes {
             UIApplication.shared.activateSceneSession(for: UISceneSessionActivationRequest(session: main)) { _ in }
         }
         UIApplication.shared.requestSceneSessionDestruction(s, options: nil)
+    }
+
+    /// The user closed these: their windows close.
+    static func discarded(_ all: Set<UISceneSession>) {
+        for s in all {
+            guard let id = s.userInfo?["window"] as? Int, sessions[id] === s else { continue }
+            sessions[id] = nil
+            if Host.shared.windows[id] != nil { Go.send(Event.closedByPage(id: id)) }
+        }
     }
 }
 
@@ -143,10 +166,13 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
-        if let a = options.userActivities.first(where: { $0.activityType == Scenes.activity }) {
+        let own = options.userActivities.first(where: { $0.activityType == Scenes.activity })?.userInfo?["window"] as? Int
+            ?? session.userInfo?["window"] as? Int
+        if let id = own {
+            Scenes.pending.remove(id)
             // A window of its own, unless it's of an earlier run, which the
-            // system brings back.
-            guard let id = a.userInfo?["window"] as? Int, let hw = Host.shared.windows[id] else {
+            // system brings back, or wanted no more.
+            guard let hw = Host.shared.windows[id], Scenes.unwanted.remove(id) == nil else {
                 UIApplication.shared.requestSceneSessionDestruction(session, options: nil)
                 return
             }
@@ -162,8 +188,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             w.makeKeyAndVisible()
             window = w
             ownWindow = id
+            session.userInfo = ["window": id]
             Scenes.sessions[id] = session
-            scene.title = Navigation.shared.controller(hw).title
+            scene.title = c.title
             hw.reportSize()
             return
         }
@@ -191,14 +218,16 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
+        // Not closed: its session stays, and the system may connect it again, for
+        // which the view lets go of the scene's window.
+        if ownWindow != 0, let c = window?.rootViewController?.children.first {
+            c.willMove(toParent: nil)
+            c.view.removeFromSuperview()
+            c.removeFromParent()
+        }
         window?.rootViewController = nil
         window = nil
-        if ownWindow != 0 {
-            // The user closed it, unless the app did.
-            if Scenes.sessions.removeValue(forKey: ownWindow) != nil, Host.shared.windows[ownWindow] != nil {
-                Go.send(Event.closedByPage(id: ownWindow))
-            }
-        } else if Host.shared.window?.windowScene === scene {
+        if ownWindow == 0, Host.shared.window?.windowScene === scene {
             Host.shared.window = nil
         }
     }
@@ -208,16 +237,19 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         if UIApplication.shared.supportsMultipleScenes { Go.send(Event.windowFront(id: ownWindow)) }
     }
 
-    func sceneWillResignActive(_ scene: UIScene) { Go.send(Event.active(active: false)) }
+    func sceneWillResignActive(_ scene: UIScene) {
+        let others = UIApplication.shared.connectedScenes.filter { $0 !== scene && $0.activationState == .foregroundActive }
+        if others.isEmpty { Go.send(Event.active(active: false)) }
+    }
 
     // Waits for Go: it must stop drawing before the app is in the background,
-    // where iOS ends apps that use the GPU. The app is there once all its
-    // scenes are.
+    // where iOS ends apps that use the GPU. The app is there once none of its
+    // scenes is on screen.
     func sceneDidEnterBackground(_ scene: UIScene) {
-        let others = UIApplication.shared.connectedScenes.filter { $0 !== scene }
-        if others.allSatisfy({ $0.activationState == .background }) {
-            Go.ask(Event.background(background: true))
+        let shown = UIApplication.shared.connectedScenes.contains {
+            $0 !== scene && ($0.activationState == .foregroundActive || $0.activationState == .foregroundInactive)
         }
+        if !shown { Go.ask(Event.background(background: true)) }
     }
 
     func sceneWillEnterForeground(_ scene: UIScene) { Go.ask(Event.background(background: false)) }
