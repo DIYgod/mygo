@@ -470,6 +470,9 @@ func (a *app) system(c *ui.Context) {
 					}
 					return st.String()
 				})
+				row("What time is it", func(ctx context.Context) string {
+					return time.Now().Format("15:04 MST, Monday")
+				})
 				row("Keep a note in SQLite", func(ctx context.Context) string {
 					dir, err := mygo.App.Path(mygo.PathUserData)
 					if err != nil {

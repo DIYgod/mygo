@@ -107,6 +107,13 @@ object HostImpl : HostCalls {
         val cache = a.cacheDir.absolutePath
         // Android sets none of these, which os.UserHomeDir, UserConfigDir,
         // UserCacheDir and TempDir read.
+        app.registerReceiver(object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                // As the system's zone changes, the default of Java keeps the old one.
+                java.util.TimeZone.setDefault(null)
+                Go.send(Event.timeZoneChanged(java.util.TimeZone.getDefault().id))
+            }
+        }, android.content.IntentFilter(Intent.ACTION_TIMEZONE_CHANGED))
         Os.setenv("HOME", files, true)
         Os.setenv("XDG_CONFIG_HOME", files, true)
         Os.setenv("XDG_CACHE_HOME", cache, true)
@@ -165,6 +172,12 @@ object HostImpl : HostCalls {
         val w = front() ?: return false
         val r = Go.ask(Event.backPressed(w.id)) ?: return false
         return BackPressedReply(r).handled
+    }
+
+    override fun timeZone(): TimeZoneReply {
+        val r = TimeZoneReply()
+        r.id = java.util.TimeZone.getDefault().id
+        return r
     }
 
     override fun appInfo(): AppInfoReply {

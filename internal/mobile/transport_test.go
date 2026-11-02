@@ -3,6 +3,7 @@ package mobile
 import (
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/internal/mobile/wire"
 	"github.com/egoist/mygo/internal/platform"
@@ -95,5 +96,19 @@ func TestRunesInUTF16(t *testing.T) {
 		if got := platform.RunesInUTF16(c.s, c.units); got != c.want {
 			t.Errorf("%q, %d: %d, want %d", c.s, c.units, got, c.want)
 		}
+	}
+}
+
+// The phone's zone is time.Local, and what Go doesn't know of leaves it.
+func TestTimeZone(t *testing.T) {
+	defer func(l *time.Location) { time.Local = l }(time.Local)
+	setTimeZone("Asia/Tokyo")
+	if name, off := time.Now().Zone(); name != "JST" || off != 9*3600 {
+		t.Errorf("in Tokyo: %s %d", name, off)
+	}
+	setTimeZone("Nowhere/Land")
+	setTimeZone("")
+	if time.Local.String() != "Asia/Tokyo" {
+		t.Errorf("after an unknown zone: %v", time.Local)
 	}
 }

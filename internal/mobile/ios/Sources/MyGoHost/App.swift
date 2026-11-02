@@ -170,6 +170,7 @@ final class RootViewController: UIViewController, UIScrollViewDelegate {
         nc.addObserver(self, selector: #selector(settingsChanged), name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil)
         nc.addObserver(self, selector: #selector(settingsChanged), name: UIContentSizeCategory.didChangeNotification, object: nil)
         nc.addObserver(self, selector: #selector(localeChanged), name: NSLocale.currentLocaleDidChangeNotification, object: nil)
+        nc.addObserver(self, selector: #selector(timeZoneChanged), name: .NSSystemTimeZoneDidChange, object: nil)
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (_: RootViewController, _) in
             Go.send(Event.themeChanged())
         }
@@ -182,6 +183,10 @@ final class RootViewController: UIViewController, UIScrollViewDelegate {
 
     @objc func settingsChanged() { Go.send(Event.themeChanged()) }
     @objc func localeChanged() { Go.send(Event.localeChanged()) }
+    @objc func timeZoneChanged() {
+        NSTimeZone.resetSystemTimeZone()
+        Go.send(Event.timeZoneChanged(id: TimeZone.current.identifier))
+    }
 
     @objc func keyboardChanged(_ n: Notification) {
         var height: CGFloat = 0

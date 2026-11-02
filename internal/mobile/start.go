@@ -18,6 +18,9 @@ func mainMain()
 // thread, once the host is there.
 func start() {
 	redirectOutput()
+	if h, ok := theHost.(interface{ callHere(msg []byte) []byte }); ok {
+		askTimeZone(h)
+	}
 	go func() {
 		runtime.LockOSThread()
 		mainMain()

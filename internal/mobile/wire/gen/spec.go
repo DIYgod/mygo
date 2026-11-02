@@ -28,6 +28,7 @@ var calls = []msg{
 		f("Languages", "strings"), f("RegionLocale", "string"), f("FirstWeekday", "int"), f("HourCycle", "int"),
 		f("System", "string"), f("SystemVersion", "string"), f("Model", "string"), f("Restoring", "bool"),
 	}},
+	{name: "TimeZone", doc: "the name of the system's time zone; any thread", wait: true, reply: []field{f("ID", "string")}},
 	{name: "Theme", doc: "the appearance and the accessibility preferences", wait: true, reply: []field{
 		f("Dark", "bool"), f("Accent", "int"), f("ReduceMotion", "bool"), f("ReduceTransparency", "bool"),
 		f("IncreaseContrast", "bool"), f("TextScale", "float"),
@@ -178,6 +179,7 @@ var events = []msg{
 	{name: "Background", doc: "the app goes to the background (true) or came back. The host waits: iOS ends apps that use the GPU in the background, so that frames stop before it returns", wait: true, args: []field{f("Background", "bool")}},
 	{name: "ThemeChanged"},
 	{name: "LocaleChanged"},
+	{name: "TimeZoneChanged", args: []field{f("ID", "string")}},
 	{name: "OpenURLs", args: []field{f("URLs", "strings")}},
 	{name: "MemoryWarning"},
 	{name: "Terminating", doc: "the process ends once Go answers", wait: true},

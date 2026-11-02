@@ -64,6 +64,12 @@ func (b *Backend) handle(msg []byte) []byte {
 	case wire.EventLocaleChanged:
 		b.forgetInfo()
 		b.h.LocaleChanged()
+	case wire.EventTimeZoneChanged:
+		var e wire.TimeZoneChangedEvent
+		e.Decode(&r)
+		setTimeZone(e.ID)
+		// What shows the time draws it again.
+		b.h.LocaleChanged()
 	case wire.EventOpenURLs:
 		var e wire.OpenURLsEvent
 		e.Decode(&r)

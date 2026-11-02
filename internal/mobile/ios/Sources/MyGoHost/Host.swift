@@ -34,6 +34,12 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
         top.present(vc, animated: true, completion: done)
     }
 
+    func timeZone() -> TimeZoneReply {
+        var r = TimeZoneReply()
+        r.id = TimeZone.current.identifier
+        return r
+    }
+
     func appInfo() -> AppInfoReply {
         var r = AppInfoReply()
         let b = Bundle.main
