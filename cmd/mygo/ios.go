@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -169,18 +170,28 @@ func (t *iosToolchain) buildApp(ctx context.Context, c, dc *Config, tk *task, op
 	if err != nil {
 		return "", err
 	}
-	if dc.Icon != "" {
-		icons, err := t.compileIcon(dc, work, bundle)
+	if dc.Icon != "" || dc.IOS.LaunchScreen != nil {
+		assets, err := t.compileAssets(dc, work, bundle)
 		if err != nil {
 			return "", err
 		}
-		for k, v := range icons {
+		for k, v := range assets {
 			info[k] = v
 		}
+	}
+	if l := dc.IOS.LaunchScreen; l != nil {
+		info["UILaunchScreen"] = launchScreenInfo(l)
+	}
+	if opts.debug && !t.simulator {
+		// A device reaches the dev server over the network, unlike the
+		// simulator, which shares the Mac's.
+		info["NSAppTransportSecurity"] = map[string]any{"NSAllowsLocalNetworking": true}
+		info["NSLocalNetworkUsageDescription"] = "Reaches the development server on this network."
 	}
 	for k, v := range plugins.infoPlist(dc.Identifier) {
 		info[k] = v
 	}
+	addBackgroundModes(info, dc.IOS.BackgroundModes)
 	for k, v := range dc.IOS.InfoPlist {
 		info[k] = v // the app's own keys win
 	}
@@ -296,43 +307,36 @@ func xcodeVersion() (string, string) {
 	return fmt.Sprintf("%02d%s%s", major, p[1][:1], p[2][:1]), build
 }
 
-// compileIcon compiles the app's icon into an asset catalog in the
-// bundle and returns the keys of Info.plist that name it.
-func (t *iosToolchain) compileIcon(c *Config, work, bundle string) (map[string]any, error) {
-	src, err := os.ReadFile(c.path(c.Icon))
+// compileAssets compiles the app's icon and the launch screen's color and
+// image into an asset catalog in the bundle, and returns the keys of
+// Info.plist that name them.
+func (t *iosToolchain) compileAssets(c *Config, work, bundle string) (map[string]any, error) {
+	catalog := filepath.Join(work, "Assets.xcassets")
+	os.RemoveAll(catalog)
+	if err := os.MkdirAll(catalog, 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(filepath.Join(catalog, "Contents.json"), []byte(assetContents), 0o644); err != nil {
+		return nil, err
+	}
+	partial := filepath.Join(work, "assets-info.plist")
+	args := []string{"actool", "--compile", bundle, "--platform", t.sdkName,
+		"--minimum-deployment-target", t.minimumVersion, "--target-device", "iphone", "--target-device", "ipad",
+		"--output-partial-info-plist", partial, "--output-format", "human-readable-text"}
+	if c.Icon != "" {
+		if err := writeIconSet(c, catalog); err != nil {
+			return nil, err
+		}
+		args = append(args, "--app-icon", "AppIcon")
+	}
+	if l := c.IOS.LaunchScreen; l != nil {
+		if err := writeLaunchAssets(c, l, catalog); err != nil {
+			return nil, err
+		}
+	}
+	out, err := exec.Command("xcrun", append(args, catalog)...).CombinedOutput()
 	if err != nil {
-		return nil, err
-	}
-	img, err := png.Decode(bytes.NewReader(src))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %v", c.Icon, err)
-	}
-	set := filepath.Join(work, "Assets.xcassets", "AppIcon.appiconset")
-	os.RemoveAll(filepath.Dir(set))
-	if err := os.MkdirAll(set, 0o755); err != nil {
-		return nil, err
-	}
-	var b bytes.Buffer
-	// The App Store takes no transparency in an iOS icon.
-	if err := png.Encode(&b, opaqueImage(resize(img, 1024))); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(filepath.Join(set, "icon.png"), b.Bytes(), 0o644); err != nil {
-		return nil, err
-	}
-	contents := `{"images":[{"filename":"icon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"mygo","version":1}}`
-	if err := os.WriteFile(filepath.Join(set, "Contents.json"), []byte(contents), 0o644); err != nil {
-		return nil, err
-	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(set), "Contents.json"), []byte(`{"info":{"author":"mygo","version":1}}`), 0o644); err != nil {
-		return nil, err
-	}
-	partial := filepath.Join(work, "icon-info.plist")
-	out, err := exec.Command("xcrun", "actool", "--compile", bundle, "--platform", t.sdkName,
-		"--minimum-deployment-target", t.minimumVersion, "--app-icon", "AppIcon", "--target-device", "iphone", "--target-device", "ipad",
-		"--output-partial-info-plist", partial, "--output-format", "human-readable-text", filepath.Dir(set)).CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("actool could not compile the icon: %v\n%s", err, bytes.TrimSpace(out))
+		return nil, fmt.Errorf("actool could not compile the app's assets: %v\n%s", err, bytes.TrimSpace(out))
 	}
 	js, err := exec.Command("plutil", "-convert", "json", "-o", "-", partial).Output()
 	if err != nil {
@@ -343,6 +347,120 @@ func (t *iosToolchain) compileIcon(c *Config, work, bundle string) (map[string]a
 		return nil, err
 	}
 	return keys, nil
+}
+
+// assetContents is the Contents.json of what holds no assets of its own.
+const assetContents = `{"info":{"author":"mygo","version":1}}`
+
+// writeIconSet writes the app's icon into the asset catalog.
+func writeIconSet(c *Config, catalog string) error {
+	src, err := os.ReadFile(c.path(c.Icon))
+	if err != nil {
+		return err
+	}
+	img, err := png.Decode(bytes.NewReader(src))
+	if err != nil {
+		return fmt.Errorf("%s: %v", c.Icon, err)
+	}
+	var b bytes.Buffer
+	// The App Store takes no transparency in an iOS icon.
+	if err := png.Encode(&b, opaqueImage(resize(img, 1024))); err != nil {
+		return err
+	}
+	contents := `{"images":[{"filename":"icon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"mygo","version":1}}`
+	return writeAssetSet(filepath.Join(catalog, "AppIcon.appiconset"), contents, "icon.png", b.Bytes())
+}
+
+// The names in the asset catalog of what the launch screen shows.
+const (
+	launchColorAsset = "LaunchBackground"
+	launchImageAsset = "LaunchImage"
+)
+
+// launchScreenInfo is the UILaunchScreen of Info.plist, whose values name
+// assets: it takes no color or file of its own.
+func launchScreenInfo(l *IOSLaunchScreen) map[string]any {
+	m := map[string]any{}
+	if l.Background != "" {
+		m["UIColorName"] = launchColorAsset
+	}
+	if l.Image != "" {
+		m["UIImageName"] = launchImageAsset
+	}
+	return m
+}
+
+// writeLaunchAssets writes the launch screen's color and image into the
+// asset catalog.
+func writeLaunchAssets(c *Config, l *IOSLaunchScreen, catalog string) error {
+	if l.Background != "" {
+		col, err := parseHexColor(l.Background)
+		if err != nil {
+			return err
+		}
+		contents, err := json.Marshal(map[string]any{
+			"colors": []any{map[string]any{"idiom": "universal", "color": map[string]any{
+				"color-space": "srgb",
+				"components": map[string]string{
+					"red":   fmt.Sprintf("%.3f", float64(col[0])/255),
+					"green": fmt.Sprintf("%.3f", float64(col[1])/255),
+					"blue":  fmt.Sprintf("%.3f", float64(col[2])/255),
+					"alpha": "1.000",
+				},
+			}}},
+			"info": map[string]any{"author": "mygo", "version": 1},
+		})
+		if err != nil {
+			return err
+		}
+		if err := writeAssetSet(filepath.Join(catalog, launchColorAsset+".colorset"), string(contents), "", nil); err != nil {
+			return err
+		}
+	}
+	if l.Image != "" {
+		src, err := os.ReadFile(c.path(l.Image))
+		if err != nil {
+			return err
+		}
+		if _, err := png.DecodeConfig(bytes.NewReader(src)); err != nil {
+			return fmt.Errorf("ios.launchScreen.image %s must be a PNG: %v", l.Image, err)
+		}
+		// At 3x: the sharpest screens' pixels, which others scale down.
+		contents := `{"images":[{"filename":"launch.png","idiom":"universal","scale":"3x"}],"info":{"author":"mygo","version":1}}`
+		if err := writeAssetSet(filepath.Join(catalog, launchImageAsset+".imageset"), contents, "launch.png", src); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeAssetSet writes a set of the asset catalog, with its file if it has
+// one.
+func writeAssetSet(dir, contents, file string, data []byte) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if file != "" {
+		if err := os.WriteFile(filepath.Join(dir, file), data, 0o644); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(filepath.Join(dir, "Contents.json"), []byte(contents), 0o644)
+}
+
+// addBackgroundModes adds modes to the UIBackgroundModes of an Info.plist,
+// which the app's plugins may have asked for too.
+func addBackgroundModes(info map[string]any, modes []string) {
+	if len(modes) == 0 {
+		return
+	}
+	list, _ := info["UIBackgroundModes"].([]any)
+	for _, m := range modes {
+		if !slices.Contains(list, any(m)) {
+			list = append(list, m)
+		}
+	}
+	info["UIBackgroundModes"] = list
 }
 
 func plistBytes(m map[string]any) []byte {
@@ -454,7 +572,10 @@ func buildIOS(c *Config, opts buildOptions, simulator bool) ([]string, error) {
 	var prof *profile
 	if !simulator {
 		// Before building: no point building for a profile that isn't there.
-		if prof, err = pickProfile(c); err != nil {
+		if prof, err = pickProfile(c, c.IOS.Distribution, ""); err != nil {
+			return nil, err
+		}
+		if _, err := prof.signingEntitlements(c); err != nil {
 			return nil, err
 		}
 		logf("Signing with %q (%s, team %s) as %s", prof.name, prof.kind, prof.team, prof.identityName)
@@ -535,6 +656,8 @@ type profile struct {
 	expires                       time.Time
 	certs                         []string // the SHA-1s of the certificates it allows
 	identity, identityName        string   // the keychain's identity that signs with it
+	devices                       []string // the UDIDs it lists, for development and ad hoc
+	entitlements                  map[string]any
 }
 
 func profileDirs() []string {
@@ -567,7 +690,7 @@ func readProfile(path string) (*profile, error) {
 	if err := json.Unmarshal(js, &d); err != nil {
 		return nil, fmt.Errorf("%s: %v", path, err)
 	}
-	p := &profile{path: path, name: d.Name, uuid: d.UUID, expires: d.ExpirationDate}
+	p := &profile{path: path, name: d.Name, uuid: d.UUID, expires: d.ExpirationDate, devices: d.ProvisionedDevices, entitlements: d.Entitlements}
 	if len(d.TeamIdentifier) > 0 {
 		p.team = d.TeamIdentifier[0]
 	}
@@ -641,14 +764,66 @@ func (p *profile) matches(team, id string) int {
 	return 0
 }
 
-// pickProfile finds the provisioning profile to sign with: the one
-// ios.provisioningProfile names, else the closest unexpired match for the
-// app's identifier and ios.distribution whose certificate is in the
-// keychain.
-func pickProfile(c *Config) (*profile, error) {
-	ids := identities()
-	want := c.IOS.ProvisioningProfile
-	dist := c.IOS.Distribution
+// profileWant is what a build asks of a provisioning profile.
+type profileWant struct {
+	team, identifier string
+	name             string // a name or UUID the configuration gives, or ""
+	dist             string // the kind it must be, unless it is named
+	device           string // the UDID it must list, or ""
+	now              time.Time
+}
+
+// chooseProfile picks the closest fit among profiles: unexpired, for the
+// identifier, whose certificate is among the keychain's identities (by
+// SHA-1), the latest to expire of those as close. It also returns why the
+// others that came close did not fit.
+func chooseProfile(all []*profile, ids map[string]string, w profileWant) (*profile, []string) {
+	var best *profile
+	bestScore := 0
+	var near []string
+	for _, p := range all {
+		if w.name != "" && p.name != w.name && p.uuid != w.name {
+			continue
+		}
+		score := p.matches(w.team, w.identifier)
+		if score == 0 {
+			continue
+		}
+		if p.kind != w.dist && w.name == "" {
+			near = append(near, fmt.Sprintf("%q (%s)", p.name, p.kind))
+			continue
+		}
+		if p.expires.Before(w.now) {
+			near = append(near, fmt.Sprintf("%q (expired %s)", p.name, p.expires.Format("2006-01-02")))
+			continue
+		}
+		if w.device != "" && p.kind != "enterprise" && !slices.Contains(p.devices, w.device) {
+			near = append(near, fmt.Sprintf("%q (it does not list this device)", p.name))
+			continue
+		}
+		for _, cert := range p.certs {
+			if name, ok := ids[cert]; ok {
+				p.identity, p.identityName = cert, name // the SHA-1: names can be ambiguous
+				if score > bestScore || score == bestScore && best != nil && p.expires.After(best.expires) {
+					best, bestScore = p, score
+				}
+				break
+			}
+		}
+		if p.identity == "" {
+			near = append(near, fmt.Sprintf("%q (its certificate is not in the keychain)", p.name))
+		}
+	}
+	return best, near
+}
+
+// pickProfile finds the provisioning profile to sign with for dist: the one
+// ios.provisioningProfile names, else the closest fit for the app's
+// identifier installed. device is the UDID it must list, if any. A profile
+// named for a release does not sign a development build, which asks for
+// another kind and identifier.
+func pickProfile(c *Config, dist, device string) (*profile, error) {
+	want := c.IOS.namedProfile(dist)
 	var all []*profile
 	if strings.HasSuffix(want, ".mobileprovision") {
 		p, err := readProfile(c.path(want))
@@ -666,38 +841,7 @@ func pickProfile(c *Config) (*profile, error) {
 			}
 		}
 	}
-	var best *profile
-	bestScore := 0
-	var near []string
-	for _, p := range all {
-		if want != "" && p.name != want && p.uuid != want {
-			continue
-		}
-		score := p.matches(c.IOS.Team, c.Identifier)
-		if score == 0 {
-			continue
-		}
-		if p.kind != dist && want == "" {
-			near = append(near, fmt.Sprintf("%q (%s)", p.name, p.kind))
-			continue
-		}
-		if p.expires.Before(time.Now()) {
-			near = append(near, fmt.Sprintf("%q (expired %s)", p.name, p.expires.Format("2006-01-02")))
-			continue
-		}
-		for _, cert := range p.certs {
-			if name, ok := ids[cert]; ok {
-				p.identity, p.identityName = cert, name // the SHA-1: names can be ambiguous
-				if score > bestScore {
-					best, bestScore = p, score
-				}
-				break
-			}
-		}
-		if p.identity == "" {
-			near = append(near, fmt.Sprintf("%q (its certificate is not in the keychain)", p.name))
-		}
-	}
+	best, near := chooseProfile(all, identities(), profileWant{team: c.IOS.Team, identifier: c.Identifier, name: want, dist: dist, device: device, now: time.Now()})
 	if best != nil {
 		return best, nil
 	}
@@ -707,6 +851,56 @@ func pickProfile(c *Config) (*profile, error) {
 		msg += "; close ones: " + strings.Join(near, ", ")
 	}
 	return nil, errors.New(msg + ". Make one for the identifier in Xcode (Settings › Accounts) or at developer.apple.com, and set ios.team, or ios.provisioningProfile in " + c.configName())
+}
+
+// namedProfile is the profile the configuration names for dist: it names the
+// release's, of ios.distribution.
+func (o IOS) namedProfile(dist string) string {
+	if dist != o.Distribution {
+		return ""
+	}
+	return o.ProvisioningProfile
+}
+
+// associatedDomains are the values of the entitlement of ios.associatedDomains.
+func (o IOS) associatedDomains() []any {
+	var out []any
+	for _, d := range o.AssociatedDomains {
+		if !strings.Contains(d, ":") {
+			d = "applinks:" + d
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// associatedDomainsKey is the entitlement of universal links.
+const associatedDomainsKey = "com.apple.developer.associated-domains"
+
+// allowsAssociatedDomains reports whether the profile has the capability,
+// which profiles of a wildcard app ID cannot have.
+func (p *profile) allowsAssociatedDomains() bool {
+	_, ok := p.entitlements[associatedDomainsKey]
+	return ok
+}
+
+// signingEntitlements are those the app is signed with: the profile's, whose
+// wildcards become the app's identifier and domains.
+func (p *profile) signingEntitlements(c *Config) (map[string]any, error) {
+	ent := make(map[string]any, len(p.entitlements)+1)
+	for k, v := range p.entitlements {
+		ent[k] = v
+	}
+	// A wildcard profile's app ID becomes the app's.
+	ent["application-identifier"] = p.team + "." + c.Identifier
+	delete(ent, associatedDomainsKey)
+	if domains := c.IOS.associatedDomains(); len(domains) > 0 {
+		if !p.allowsAssociatedDomains() {
+			return nil, fmt.Errorf("ios.associatedDomains needs the capability Associated Domains, which %q has not: turn it on for %s at developer.apple.com, then make the profile again", p.name, c.Identifier)
+		}
+		ent[associatedDomainsKey] = domains
+	}
+	return ent, nil
 }
 
 // sign embeds the profile, signs the bundle with its entitlements and
@@ -719,20 +913,12 @@ func (p *profile) sign(work, bundle string, c *Config) error {
 	if err := os.WriteFile(filepath.Join(bundle, "embedded.mobileprovision"), data, 0o644); err != nil {
 		return err
 	}
-	raw, err := exec.Command("security", "cms", "-D", "-i", p.path).Output()
+	entitlements, err := p.signingEntitlements(c)
 	if err != nil {
 		return err
 	}
-	decoded := filepath.Join(work, "profile.plist")
-	if err := os.WriteFile(decoded, raw, 0o644); err != nil {
-		return err
-	}
 	ent := filepath.Join(work, "entitlements.plist")
-	if err := runQuiet("plutil", "-extract", "Entitlements", "xml1", "-o", ent, decoded); err != nil {
-		return err
-	}
-	// A wildcard profile's app ID becomes the app's.
-	if err := runQuiet("plutil", "-replace", "application-identifier", "-string", p.team+"."+c.Identifier, ent); err != nil {
+	if err := os.WriteFile(ent, plistBytes(entitlements), 0o644); err != nil {
 		return err
 	}
 	if err := signFrameworks(bundle, p.identity); err != nil {

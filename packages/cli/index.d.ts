@@ -41,7 +41,7 @@ export type ConfigFn = (env: ConfigEnv) => Config | Promise<Config>;
 /** What a configuration function gets. */
 export interface ConfigEnv {
   /** The mygo command running. */
-  command: "dev" | "build" | "generate" | "init";
+  command: "dev" | "build" | "generate" | "init" | "publish";
 }
 
 /** The configuration of a MyGo project. Every field is optional. */
@@ -293,6 +293,25 @@ export interface IOSConfig {
   orientations?: ("portrait" | "landscape")[];
   /** Extra keys of Info.plist, which replace MyGo's own, as usage descriptions. */
   infoPlist?: Record<string, unknown>;
+  /**
+   * The hosts of the app's universal links, which reach `App.OnOpenURL`:
+   * `example.com` signs the app with `applinks:example.com`, and a value with
+   * its own service, as `webcredentials:example.com`, stays as it is. The
+   * provisioning profile needs the capability Associated Domains.
+   */
+  associatedDomains?: string[];
+  /** What the system shows while the app starts (default: the system background). */
+  launchScreen?: IOSLaunchScreen;
+  /** The app's `UIBackgroundModes`, as `audio`, `fetch` or `remote-notification`, with those its plugins ask for. */
+  backgroundModes?: string[];
+}
+
+/** The launch screen of the iOS app: at least one of its fields. */
+export interface IOSLaunchScreen {
+  /** Its color, as `#102030`. */
+  background?: string;
+  /** A PNG shown centered, at the size of a 3x screen: a logo of 600×600 pixels takes 200×200 points. */
+  image?: string;
 }
 
 /** The Android app. */
@@ -307,6 +326,24 @@ export interface AndroidConfig {
   keystore?: string;
   /** The alias of the upload key in the keystore. */
   keyAlias?: string;
+  /**
+   * The hosts of the app's https deep links, verified by Android, which reach
+   * `App.OnOpenURL`: each serves `/.well-known/assetlinks.json` naming the
+   * app. `*.example.com` takes its subdomains.
+   */
+  appLinks?: string[];
+  /** The launcher icon of Android 8.0 and later, which the launcher masks and moves. Without it, launchers show `icon` as it is. */
+  adaptiveIcon?: AndroidAdaptiveIcon;
+  /** The color of the screen the system shows while the app starts, as `#102030` (default: the theme's). */
+  splash?: string;
+}
+
+/** An icon of two layers. */
+export interface AndroidAdaptiveIcon {
+  /** A square PNG, ideally 432×432 or more, with transparency around what it shows: launchers crop to the middle 72/108 of it. */
+  foreground: string;
+  /** The color under it, as `#102030`. */
+  background: string;
 }
 
 export interface LinuxConfig {

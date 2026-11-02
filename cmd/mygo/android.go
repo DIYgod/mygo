@@ -8,9 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
 	"image/png"
 	"io"
 	"io/fs"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -44,27 +48,11 @@ type androidToolchain struct {
 }
 
 func newAndroidToolchain() (*androidToolchain, error) {
-	t := &androidToolchain{}
-	home, _ := os.UserHomeDir()
-	for _, d := range []string{os.Getenv("ANDROID_HOME"), os.Getenv("ANDROID_SDK_ROOT"),
-		filepath.Join(home, "Library", "Android", "sdk"), filepath.Join(home, "Android", "Sdk"),
-		filepath.Join(os.Getenv("LOCALAPPDATA"), "Android", "Sdk")} {
-		if d != "" && isDir(filepath.Join(d, "platforms")) {
-			t.sdk = d
-			break
-		}
-	}
+	t := &androidToolchain{sdk: findAndroidSDK()}
 	if t.sdk == "" {
 		return nil, errors.New("no Android SDK: install Android Studio, or set ANDROID_HOME")
 	}
-	ndk := os.Getenv("ANDROID_NDK_HOME")
-	if ndk == "" {
-		versions, _ := filepath.Glob(filepath.Join(t.sdk, "ndk", "*"))
-		sort.Slice(versions, func(i, j int) bool { return versionLess(filepath.Base(versions[i]), filepath.Base(versions[j])) })
-		if len(versions) > 0 {
-			ndk = versions[len(versions)-1]
-		}
-	}
+	ndk := findAndroidNDK(t.sdk)
 	if ndk == "" {
 		return nil, errors.New("no Android NDK: install it in Android Studio (SDK Manager › SDK Tools › NDK), or set ANDROID_NDK_HOME")
 	}
@@ -73,18 +61,68 @@ func newAndroidToolchain() (*androidToolchain, error) {
 		return nil, fmt.Errorf("the NDK in %s has no clang", ndk)
 	}
 	t.ndkBin = hosts[0]
-	t.javaHome = os.Getenv("JAVA_HOME")
-	if t.javaHome == "" {
-		for _, d := range []string{"/Applications/Android Studio.app/Contents/jbr/Contents/Home",
-			filepath.Join(home, "Applications", "Android Studio.app", "Contents", "jbr", "Contents", "Home"),
-			"/opt/android-studio/jbr", filepath.Join(os.Getenv("ProgramFiles"), "Android", "Android Studio", "jbr")} {
-			if isDir(d) {
-				t.javaHome = d
-				break
-			}
+	t.javaHome = findJavaHome()
+	return t, nil
+}
+
+// findAndroidSDK returns the directory of the Android SDK, in ANDROID_HOME
+// or its usual place, or "".
+func findAndroidSDK() string {
+	home, _ := os.UserHomeDir()
+	for _, d := range []string{os.Getenv("ANDROID_HOME"), os.Getenv("ANDROID_SDK_ROOT"),
+		filepath.Join(home, "Library", "Android", "sdk"), filepath.Join(home, "Android", "Sdk"),
+		filepath.Join(os.Getenv("LOCALAPPDATA"), "Android", "Sdk")} {
+		if d != "" && isDir(filepath.Join(d, "platforms")) {
+			return d
 		}
 	}
-	return t, nil
+	return ""
+}
+
+// findAndroidNDK returns the directory of the NDK, in ANDROID_NDK_HOME or
+// the newest of the SDK's, or "".
+func findAndroidNDK(sdk string) string {
+	if ndk := os.Getenv("ANDROID_NDK_HOME"); ndk != "" {
+		return ndk
+	}
+	versions, _ := filepath.Glob(filepath.Join(sdk, "ndk", "*"))
+	sort.Slice(versions, func(i, j int) bool { return versionLess(filepath.Base(versions[i]), filepath.Base(versions[j])) })
+	if len(versions) == 0 {
+		return ""
+	}
+	return versions[len(versions)-1]
+}
+
+// findJavaHome returns the JDK Gradle runs on, in JAVA_HOME or Android
+// Studio's, or "": then Gradle looks for java itself.
+func findJavaHome() string {
+	if h := os.Getenv("JAVA_HOME"); h != "" {
+		return h
+	}
+	home, _ := os.UserHomeDir()
+	for _, d := range []string{"/Applications/Android Studio.app/Contents/jbr/Contents/Home",
+		filepath.Join(home, "Applications", "Android Studio.app", "Contents", "jbr", "Contents", "Home"),
+		"/opt/android-studio/jbr", filepath.Join(os.Getenv("ProgramFiles"), "Android", "Android Studio", "jbr")} {
+		if isDir(d) {
+			return d
+		}
+	}
+	return ""
+}
+
+// sdkTool returns the path of a tool in a directory of the SDK, or its name
+// to find on the PATH.
+func sdkTool(dir, name string) string {
+	if sdk := findAndroidSDK(); sdk != "" {
+		p := filepath.Join(sdk, dir, name)
+		if runtime.GOOS == "windows" {
+			p += ".exe"
+		}
+		if fileExists(p) {
+			return p
+		}
+	}
+	return name
 }
 
 // versionLess orders NDK versions, 27.1.12297006 after 27.0.12077973.
@@ -203,12 +241,16 @@ func androidManifest(c *Config, plugins mobilePlugins) []byte {
 	for _, p := range perms {
 		fmt.Fprintf(&b, "    <uses-permission android:name=%q />\n", p)
 	}
+	theme := "Theme.MyGo"
+	if c.Android.Splash != "" {
+		theme = androidSplashTheme
+	}
 	b.WriteString(`    <application
         android:label="${mygoAppName}"
         android:icon="${mygoIcon}"
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
-        android:theme="@style/Theme.MyGo">
+        android:theme="@style/` + theme + `">
         <activity
             android:name="dev.mygo.MyGoActivity"
             android:exported="true"
@@ -229,6 +271,16 @@ func androidManifest(c *Config, plugins mobilePlugins) []byte {
             </intent-filter>
 `, s)
 	}
+	for _, h := range c.Android.AppLinks {
+		// One filter a host: Android verifies the hosts of a filter together.
+		fmt.Fprintf(&b, `            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host=%q />
+            </intent-filter>
+`, h)
+	}
 	b.WriteString("        </activity>\n")
 	for _, x := range plugins.manifestApplication() {
 		b.WriteString(x + "\n")
@@ -237,33 +289,138 @@ func androidManifest(c *Config, plugins mobilePlugins) []byte {
 	return []byte(b.String())
 }
 
-// icons writes the launcher icon at each density into res.
+// androidIconSizes are the sizes of a launcher icon, in pixels at each
+// density: 48dp. Those of an adaptive icon's layers are 108dp.
+var androidIconSizes = map[string]int{"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
+
+// androidIcons writes the launcher icon at each density into res, with the
+// adaptive icon of Android 8.0 and later over it. It reports whether the app
+// has one.
 func androidIcons(c *Config, res string) (bool, error) {
-	if c.Icon == "" {
+	var legacy image.Image
+	if c.Icon != "" {
+		src, err := os.ReadFile(c.path(c.Icon))
+		if err != nil {
+			return false, err
+		}
+		if legacy, err = png.Decode(bytes.NewReader(src)); err != nil {
+			return false, fmt.Errorf("%s: %v", c.Icon, err)
+		}
+	}
+	if a := c.Android.AdaptiveIcon; a != nil {
+		fg, err := writeAdaptiveIcon(c, a, res)
+		if err != nil {
+			return false, err
+		}
+		if legacy == nil {
+			// Systems older than Android 8.0 show the icon's two layers as one.
+			if legacy, err = flattenAdaptiveIcon(fg, a.Background); err != nil {
+				return false, err
+			}
+		}
+	}
+	if legacy == nil {
 		return false, nil
 	}
-	src, err := os.ReadFile(c.path(c.Icon))
-	if err != nil {
-		return false, err
-	}
-	img, err := png.Decode(bytes.NewReader(src))
-	if err != nil {
-		return false, fmt.Errorf("%s: %v", c.Icon, err)
-	}
-	for density, size := range map[string]int{"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192} {
-		dir := filepath.Join(res, "mipmap-"+density)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return false, err
-		}
-		var b bytes.Buffer
-		if err := png.Encode(&b, resize(img, size)); err != nil {
-			return false, err
-		}
-		if err := os.WriteFile(filepath.Join(dir, "ic_launcher.png"), b.Bytes(), 0o644); err != nil {
+	for density, size := range androidIconSizes {
+		if err := writeIconPNG(filepath.Join(res, "mipmap-"+density, "ic_launcher.png"), resize(legacy, size)); err != nil {
 			return false, err
 		}
 	}
 	return true, nil
+}
+
+func writeIconPNG(path string, img image.Image) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	var b bytes.Buffer
+	if err := png.Encode(&b, img); err != nil {
+		return err
+	}
+	return os.WriteFile(path, b.Bytes(), 0o644)
+}
+
+// writeAdaptiveIcon writes the layers of an adaptive icon into res, and
+// returns its foreground.
+func writeAdaptiveIcon(c *Config, a *AndroidAdaptiveIcon, res string) (image.Image, error) {
+	src, err := os.ReadFile(c.path(a.Foreground))
+	if err != nil {
+		return nil, err
+	}
+	if err := validateIcon(src); err != nil {
+		return nil, fmt.Errorf("android.adaptiveIcon.foreground: %w", err)
+	}
+	fg, err := png.Decode(bytes.NewReader(src))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %v", a.Foreground, err)
+	}
+	for density, size := range androidIconSizes {
+		if err := writeIconPNG(filepath.Join(res, "mipmap-"+density, "ic_launcher_foreground.png"), resize(fg, size*108/48)); err != nil {
+			return nil, err
+		}
+	}
+	files := map[string]string{
+		filepath.Join("mipmap-anydpi-v26", "ic_launcher.xml"): `<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>
+`,
+		filepath.Join("values", "mygo_icon.xml"): fmt.Sprintf("<resources>\n    <color name=\"ic_launcher_background\">%s</color>\n</resources>\n", a.Background),
+	}
+	return fg, writeResFiles(res, files)
+}
+
+// flattenAdaptiveIcon draws what launchers show of an adaptive icon, the
+// middle 72/108 of its foreground, over its background.
+func flattenAdaptiveIcon(fg image.Image, background string) (image.Image, error) {
+	col, err := parseHexColor(background)
+	if err != nil {
+		return nil, err
+	}
+	b := fg.Bounds()
+	inset := b.Dx() * 18 / 108
+	out := image.NewNRGBA(image.Rect(0, 0, b.Dx()-2*inset, b.Dy()-2*inset))
+	draw.Draw(out, out.Bounds(), image.NewUniform(color.NRGBA{col[0], col[1], col[2], 255}), image.Point{}, draw.Src)
+	draw.Draw(out, out.Bounds(), fg, b.Min.Add(image.Pt(inset, inset)), draw.Over)
+	return out, nil
+}
+
+// androidSplashTheme is the style the manifest names with android.splash:
+// the host's theme, which a resource of the same name could not replace in
+// its source set, with the splash screen's color.
+const androidSplashTheme = "Theme.MyGo.Splash"
+
+// writeAndroidSplash writes the style of the splash screen into res. Android
+// 12 and later take its color from windowSplashScreenBackground, and
+// earlier systems show the window's background while the app starts.
+func writeAndroidSplash(res, background string) error {
+	style := func(items string) string {
+		return `<resources>
+    <style name="` + androidSplashTheme + `" parent="Theme.MyGo">
+        <item name="android:windowBackground">@color/mygo_splash</item>
+` + items + `    </style>
+</resources>
+`
+	}
+	return writeResFiles(res, map[string]string{
+		filepath.Join("values", "mygo_splash_color.xml"): fmt.Sprintf("<resources>\n    <color name=\"mygo_splash\">%s</color>\n</resources>\n", background),
+		filepath.Join("values", "mygo_splash.xml"):       style(""),
+		filepath.Join("values-v31", "mygo_splash.xml"):   style("        <item name=\"android:windowSplashScreenBackground\">@color/mygo_splash</item>\n"),
+	})
+}
+
+func writeResFiles(res string, files map[string]string) error {
+	for name, content := range files {
+		path := filepath.Join(res, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // versionCode is the integer version Google Play orders uploads by.
@@ -291,6 +448,11 @@ func (t *androidToolchain) gradle(ctx context.Context, c, dc *Config, dir, work,
 	hasIcon, err := androidIcons(dc, res)
 	if err != nil {
 		return err
+	}
+	if dc.Android.Splash != "" {
+		if err := writeAndroidSplash(res, dc.Android.Splash); err != nil {
+			return err
+		}
 	}
 	plugins, err := c.mobilePlugins("android")
 	if err != nil {
@@ -437,43 +599,38 @@ func buildAndroid(c *Config, opts buildOptions, arch string) ([]string, error) {
 
 // adb runs adb of the SDK.
 func adb(serial string, args ...string) *exec.Cmd {
-	bin := "adb"
-	if t, err := newAndroidToolchain(); err == nil {
-		bin = filepath.Join(t.sdk, "platform-tools", "adb")
-	}
 	if serial != "" {
 		args = append([]string{"-s", serial}, args...)
 	}
-	return exec.Command(bin, args...)
+	return exec.Command(sdkTool("platform-tools", "adb"), args...)
 }
 
 // androidDevice finds the device or emulator to run on: id if set (adb's
-// serial), else the only one adb reaches, or the first.
-func androidDevice(id string) (*mobileDevice, error) {
-	out, err := adb("", "devices", "-l").Output()
+// serial, the name of a running emulator's AVD or a device's model), else
+// the first adb reaches. An AVD that is not running starts.
+func androidDevice(ctx context.Context, id string) (*mobileDevice, error) {
+	devs, err := adbDevices()
 	if err != nil {
 		return nil, fmt.Errorf("adb: %v (install the SDK's platform tools)", err)
 	}
-	for _, l := range strings.Split(string(out), "\n")[1:] {
-		f := strings.Fields(l)
-		if len(f) < 2 || f[1] != "device" {
-			continue
-		}
-		if id != "" && f[0] != id {
-			continue
-		}
-		name := f[0]
-		for _, x := range f[2:] {
-			if m, ok := strings.CutPrefix(x, "model:"); ok {
-				name = strings.ReplaceAll(m, "_", " ")
-			}
-		}
-		return &mobileDevice{"android", f[0], name}, nil
+	d, err := pickAndroidDevice(devs, id)
+	if err == nil {
+		return &mobileDevice{platform: "android", id: d.serial, name: d.displayName()}, nil
 	}
-	if id != "" {
-		return nil, fmt.Errorf("adb reaches no device %q (adb devices lists them)", id)
+	avds := listAVDs()
+	// One adb lists is starting or stuck, and a second would not start.
+	running := slices.ContainsFunc(devs, func(d adbDevice) bool { return d.avd == id })
+	if id != "" && !running && slices.Contains(avds, id) {
+		booted, err := startAVD(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		return &mobileDevice{platform: "android", id: booted.serial, name: id}, nil
 	}
-	return nil, errors.New("adb reaches no device: start an emulator, or connect a device with USB debugging on")
+	if id == "" && len(avds) > 0 {
+		return nil, fmt.Errorf("%v; or start an emulator with -device %s", err, avds[0])
+	}
+	return nil, err
 }
 
 // buildAndroidDev builds the debug APK for the device's ABI.
@@ -641,11 +798,26 @@ func hashIfExists(h io.Writer, path string) error {
 }
 
 // reachDevURL returns the URL at which the device reaches the dev server
-// at u: the simulator shares the Mac's network, and Android's devices
-// reach it at the same port through adb reverse.
+// at u: the simulator shares the Mac's network, an iOS device reaches it over
+// the network, which the server must listen on, and Android's devices reach
+// it at the same port through adb reverse.
 func (d *mobileDevice) reachDevURL(u string) (string, error) {
 	if d.platform != "android" {
-		return u, nil
+		if !d.physical {
+			return u, nil
+		}
+		ip, err := lanAddress()
+		if err != nil {
+			return u, fmt.Errorf("%s reaches the dev server over the network, and this computer has none: %v", d.name, err)
+		}
+		reached, err := lanDevURL(u, ip)
+		if err != nil {
+			return u, err
+		}
+		if reached != u {
+			warnf("%s loads the dev server at %s: it must listen on the network, as vite --host", d.name, reached)
+		}
+		return reached, nil
 	}
 	p, err := url.Parse(u)
 	if err != nil {
@@ -663,4 +835,35 @@ func (d *mobileDevice) reachDevURL(u string) (string, error) {
 	}
 	p.Host = "localhost:" + port
 	return p.String(), nil
+}
+
+// lanDevURL replaces a local host of a URL with ip, what another machine
+// reaches this one at. Other hosts stay.
+func lanDevURL(u, ip string) (string, error) {
+	p, err := url.Parse(u)
+	if err != nil {
+		return u, err
+	}
+	switch p.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+	default:
+		return u, nil
+	}
+	if port := p.Port(); port != "" {
+		p.Host = net.JoinHostPort(ip, port)
+	} else {
+		p.Host = ip
+	}
+	return p.String(), nil
+}
+
+// lanAddress returns this computer's address on its network. Connecting a
+// UDP socket sends nothing: it only picks the route.
+func lanAddress() (string, error) {
+	conn, err := net.Dial("udp4", "192.0.2.1:9")
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	return conn.LocalAddr().(*net.UDPAddr).IP.String(), nil
 }
