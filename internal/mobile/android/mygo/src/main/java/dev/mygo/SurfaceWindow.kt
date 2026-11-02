@@ -178,10 +178,13 @@ class SurfaceWindow(context: Context, id: Long) : HostWindow(context, id) {
     }
 
     private val density get() = HostImpl.density.toDouble()
+    /** The virtual view that stands for the input in focus, to autofill. */
+    private val autofillNode = 1
 
     fun setTextInput(c: SetTextInputCall) {
         val was = input
         input = c
+        tellAutofill(was, c)
         val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         val traits = was.multiline != c.multiline || was.secure != c.secure || was.keyboard != c.keyboard || was.returnKey != c.returnKey ||
             was.capitalize != c.capitalize || was.autocorrect != c.autocorrect || was.autofill != c.autofill
@@ -217,6 +220,10 @@ class SurfaceWindow(context: Context, id: Long) : HostWindow(context, id) {
         c.selEnd = st.selEnd
         c.markStart = st.markStart
         c.markEnd = st.markEnd
+        if (autofillHint(c) != null) {
+            context.getSystemService(android.view.autofill.AutofillManager::class.java)
+                ?.notifyValueChanged(surface, autofillNode, android.view.autofill.AutofillValue.forText(wholeText(c)))
+        }
         if (changed) {
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.updateSelection(surface, c.selStart.toInt(), c.selEnd.toInt(), c.markStart.toInt(), c.markEnd.toInt())
@@ -419,6 +426,75 @@ class SurfaceWindow(context: Context, id: Long) : HostWindow(context, id) {
         }
 
         override fun getAccessibilityNodeProvider(): AccessibilityNodeProvider = Provider()
+
+        // Autofill: to the system, the input in focus is the one field of a
+        // form of its own. The window's surface draws it: only this says what
+        // it is, so that saved passwords and codes from SMS reach it.
+        override fun onProvideAutofillVirtualStructure(s: android.view.ViewStructure, flags: Int) {
+            s.setClassName(javaClass.name)
+            val c = input
+            val hint = autofillHint(c)
+            if (!editing || hint == null) return
+            val child = s.newChild(s.addChildCount(1))
+            child.setAutofillId(s.autofillId!!, autofillNode)
+            child.setClassName("android.widget.EditText")
+            child.setAutofillType(AUTOFILL_TYPE_TEXT)
+            child.setAutofillHints(arrayOf(hint))
+            child.setInputType(inputType(c))
+            child.setDataIsSensitive(c.secure)
+            child.setVisibility(VISIBLE)
+            child.setFocused(true)
+            child.setFocusable(true)
+            child.setEnabled(true)
+            child.setDimens((c.x * density).toInt(), (c.y * density).toInt(), 0, 0, (c.width * density).toInt(), (c.height * density).toInt())
+            child.setAutofillValue(android.view.autofill.AutofillValue.forText(wholeText(c)))
+        }
+
+        override fun autofill(values: android.util.SparseArray<android.view.autofill.AutofillValue>) {
+            val v = values.get(autofillNode) ?: return
+            if (!editing || !v.isText) return
+            edit(Event.textReplace(wid, true, 0, input.length, v.textValue.toString()))
+        }
+    }
+
+    /** The hint of Android's autofill for an input's traits, null for none. */
+    private fun autofillHint(c: SetTextInputCall): String? = when (c.autofill) {
+        "username" -> View.AUTOFILL_HINT_USERNAME
+        "password", "newPassword" -> View.AUTOFILL_HINT_PASSWORD
+        "oneTimeCode" -> "smsOTPCode" // androidx.autofill's HintConstants
+        "email" -> View.AUTOFILL_HINT_EMAIL_ADDRESS
+        "name" -> View.AUTOFILL_HINT_NAME
+        "phone" -> View.AUTOFILL_HINT_PHONE
+        "address" -> View.AUTOFILL_HINT_POSTAL_ADDRESS
+        "postalCode" -> View.AUTOFILL_HINT_POSTAL_CODE
+        "creditCard" -> View.AUTOFILL_HINT_CREDIT_CARD_NUMBER
+        else -> null
+    }
+
+    /** The input's whole text, which the host's copy may hold only part of. */
+    private fun wholeText(c: SetTextInputCall): String =
+        if (c.base == 0L && c.text.length.toLong() == c.length) c.text else document(0, c.length.toInt()).toString()
+
+    /** Tells the system's autofill what the input did, for those it knows of. */
+    private fun tellAutofill(was: SetTextInputCall, c: SetTextInputCall) {
+        val am = context.getSystemService(android.view.autofill.AutofillManager::class.java) ?: return
+        val had = was.active && autofillHint(was) != null
+        val has = c.active && autofillHint(c) != null
+        val another = c.serial != was.serial || !was.active
+        if (had && (!c.active || another)) {
+            am.notifyViewExited(surface, autofillNode)
+            // A form sent or left: the system may offer to save what it holds.
+            if (was.secure && was.length > 0 && !has) am.commit()
+        }
+        if (has && (!had || another)) {
+            val at = IntArray(2)
+            surface.getLocationOnScreen(at)
+            val x = at[0] + (c.x * density).toInt()
+            val y = at[1] + (c.y * density).toInt()
+            val r = Rect(x, y, x + (c.width * density).toInt(), y + (c.height * density).toInt())
+            surface.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
+            am.notifyViewEntered(surface, autofillNode, r)
+        }
     }
 
     /** The inputType of EditorInfo for an input's traits. */
