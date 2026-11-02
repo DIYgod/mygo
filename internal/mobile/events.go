@@ -46,6 +46,12 @@ func (b *Backend) handle(msg []byte) []byte {
 					w.s.foreground()
 				}
 			}
+			// Started out of sight, as for a background task or by how iOS
+			// says it launches, it's no coming back.
+			if b.startedHidden {
+				b.startedHidden = false
+				break
+			}
 			b.h.PowerEvent("resume")
 			if b.ready {
 				b.h.Activated(b.front() != nil)

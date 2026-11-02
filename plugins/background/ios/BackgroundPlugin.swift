@@ -6,10 +6,15 @@ import UIKit
 final class BackgroundPlugin: MyGoPlugin {
     private struct Task: Codable {
         var every: Double
+        var delay: Double
         var next: Date
         var long: Bool
         var network: Bool
         var charging: Bool
+
+        func sameOptions(as o: Task) -> Bool {
+            every == o.every && delay == o.delay && long == o.long && network == o.network && charging == o.charging
+        }
     }
 
     /// What one of the system's tasks is running.
@@ -18,6 +23,7 @@ final class BackgroundPlugin: MyGoPlugin {
         let long: Bool
         var left: Set<Int>
         var ok = true
+        var done = false
         init(task: BGTask, long: Bool, left: Set<Int>) {
             self.task = task
             self.long = long
@@ -30,6 +36,7 @@ final class BackgroundPlugin: MyGoPlugin {
     private let storeKey = "mygo.background.tasks"
     private var nextRun = 1
     private var runs: [Int: Run] = [:]
+    private var names: [Int: String] = [:]
     private var ready = false
     private var waiting: [[String: Any]] = []
 
@@ -55,12 +62,19 @@ final class BackgroundPlugin: MyGoPlugin {
             reply(.success(nil))
         case "schedule":
             var all = load()
+            let name = args["name"] as? String ?? ""
             let every = (args["every"] as? Double) ?? 0
             let delay = (args["delay"] as? Double) ?? 0
-            all[args["name"] as? String ?? ""] = Task(
-                every: every, next: Date().addingTimeInterval(delay),
-                long: args["long"] as? Bool ?? false, network: args["network"] as? Bool ?? false,
-                charging: args["charging"] as? Bool ?? false)
+            let t = Task(every: every, delay: delay, next: Date().addingTimeInterval(delay),
+                         long: args["long"] as? Bool ?? false, network: args["network"] as? Bool ?? false,
+                         charging: args["charging"] as? Bool ?? false)
+            // The same again, as each launch asks: when it's due stands, or it
+            // would be put off for ever by an app that's opened often.
+            if let old = all[name], old.sameOptions(as: t) {
+                reply(.success(nil))
+                return
+            }
+            all[name] = t
             save(all)
             do {
                 try submit(all)
@@ -117,12 +131,8 @@ final class BackgroundPlugin: MyGoPlugin {
         var all = load()
         let now = Date()
         let due = all.filter { $0.value.long == long && $0.value.next <= now.addingTimeInterval(60) }
-        for (name, t) in due {
-            if t.every > 0 {
-                all[name]?.next = now.addingTimeInterval(t.every)
-            } else {
-                all[name] = nil
-            }
+        for (name, t) in due where t.every > 0 {
+            all[name]?.next = now.addingTimeInterval(t.every)
         }
         save(all)
         try? submit(all)
@@ -135,6 +145,7 @@ final class BackgroundPlugin: MyGoPlugin {
             let id = nextRun
             nextRun += 1
             ids.insert(id)
+            names[id] = name
             let e: [String: Any] = ["run": id, "name": name]
             if ready {
                 PluginHost.emit("background", "run", e)
@@ -146,12 +157,20 @@ final class BackgroundPlugin: MyGoPlugin {
         for id in ids { runs[id] = run }
         task.expirationHandler = { [weak self, weak run] in
             guard let self, let run else { return }
+            // Handlers get a moment to let go of what they hold, as a database's
+            // lock, before the system suspends the app.
             for id in run.left {
-                PluginHost.emit("background", "stop", ["run": id])
-                self.runs[id] = nil
+                if let i = self.waiting.firstIndex(where: { $0["run"] as? Int == id }) {
+                    self.waiting.remove(at: i)
+                    self.finished(run: id, ok: false)
+                } else {
+                    PluginHost.emit("background", "stop", ["run": id])
+                }
             }
-            run.left = []
-            run.task.setTaskCompleted(success: false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak run] in
+                guard let self, let run, !run.done else { return }
+                for id in run.left { self.finished(run: id, ok: false) }
+            }
         }
     }
 
@@ -159,6 +178,20 @@ final class BackgroundPlugin: MyGoPlugin {
         guard let run = runs.removeValue(forKey: id) else { return }
         run.left.remove(id)
         run.ok = run.ok && ok
-        if run.left.isEmpty { run.task.setTaskCompleted(success: run.ok) }
+        if ok, let name = names[id] {
+            // Once it succeeded, what runs once is off the list; failed, it
+            // stays, to run again.
+            var all = load()
+            if let t = all[name], t.every == 0 {
+                all[name] = nil
+                save(all)
+                try? submit(all)
+            }
+        }
+        names[id] = nil
+        if run.left.isEmpty && !run.done {
+            run.done = true
+            run.task.setTaskCompleted(success: run.ok)
+        }
     }
 }

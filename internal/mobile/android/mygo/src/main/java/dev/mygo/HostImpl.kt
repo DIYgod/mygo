@@ -131,9 +131,14 @@ object HostImpl : HostCalls {
         Os.setenv("XDG_CONFIG_HOME", files, true)
         Os.setenv("XDG_CACHE_HOME", cache, true)
         Os.setenv("TMPDIR", cache, true)
-        intent?.getStringExtra("mygo.env")?.split('\n')?.forEach { line ->
-            val i = line.indexOf('=')
-            if (i > 0) Os.setenv(line.substring(0, i), line.substring(i + 1), true)
+        // Only mygo dev's, in a debug build: the Activity is exported, and any
+        // app could otherwise set a proxy for this one's traffic.
+        val debuggable = a.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
+        if (debuggable) {
+            intent?.getStringExtra("mygo.env")?.split('\n')?.forEach { line ->
+                val i = line.indexOf('=')
+                if (i > 0) Os.setenv(line.substring(0, i), line.substring(i + 1), true)
+            }
         }
         registerPlugins()
         // The first launch of a version copies the app's resources, which may

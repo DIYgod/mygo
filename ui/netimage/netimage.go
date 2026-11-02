@@ -11,11 +11,13 @@
 package netimage
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
 	"io"
 	"net/http"
 	"os"
@@ -90,7 +92,7 @@ func Load(c *ui.Context, url string, o ...Options) (src ui.ImageSource, err erro
 // list that's about to come.
 func Preload(urls ...string) {
 	for _, u := range urls {
-		shared.request(u, defaultSide, nil)
+		shared.preload(u)
 	}
 }
 
@@ -124,6 +126,13 @@ const (
 	// abandoned is how long after its last showing a picture still waiting
 	// is given up: a fling went past it.
 	abandoned = 2 * time.Second
+	// onScreen is how long after its last showing a picture may still show.
+	onScreen = 2 * time.Second
+	// maxBytes and maxPixels bound what one picture may ask of the phone.
+	maxBytes  = 64 << 20
+	maxPixels = 64 << 20
+	// tooManyEntries sweeps what failed and what's no longer asked for.
+	tooManyEntries = 2048
 	// retryAfter waits before asking again for what failed.
 	retryAfter = 10 * time.Second
 	// defaultFresh is how long a picture is trusted whose server says nothing.
@@ -155,6 +164,9 @@ type entry struct {
 	loading bool
 	// fresh says the disk's copy showed at once, not after a wait: no fade.
 	fresh bool
+	// preload goes to disk alone, and isn't given up; forgotten was let go of as
+	// it downloads, and keeps nothing.
+	preload, forgotten bool
 	// waiters are the views to build again.
 	waiters []*ui.Context
 }
@@ -216,36 +228,101 @@ func (m *cache) request(url string, side int, c *ui.Context) (ui.ImageSource, ti
 	return nil, -1, e.err
 }
 
+// preload downloads a picture to disk, unless it's there or on its way.
+func (m *cache) preload(url string) {
+	k := key{url: url}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.entries[k] != nil {
+		return
+	}
+	e := &entry{key: k, preload: true, loading: true, used: m.now()}
+	m.entries[k] = e
+	m.queue = append(m.queue, e)
+	m.startLocked()
+}
+
 // startLocked gives workers what waits, the last asked for first: what's on
-// screen now.
+// screen now. What's gone by its turn leaves, and the views that asked build
+// again, to ask again if they still show it.
 func (m *cache) startLocked() {
+	var told []*ui.Context
 	for m.running < workers && len(m.queue) > 0 {
 		e := m.queue[len(m.queue)-1]
 		m.queue = m.queue[:len(m.queue)-1]
-		if m.now().Sub(e.used) > abandoned {
+		if e.forgotten {
+			told = append(told, e.waiters...)
+			e.waiters = nil
+			continue
+		}
+		if !e.preload && m.now().Sub(e.used) > abandoned {
 			e.loading = false
+			told = append(told, e.waiters...)
+			e.waiters = nil
+			delete(m.entries, e.key)
 			continue
 		}
 		m.running++
 		go m.bring(e)
 	}
+	if len(m.entries) > tooManyEntries {
+		now := m.now()
+		for k, e := range m.entries {
+			if e.src == nil && !e.loading && now.Sub(e.failed) >= retryAfter {
+				told = append(told, e.waiters...)
+				delete(m.entries, k)
+			}
+		}
+	}
+	if len(told) > 0 {
+		go func() {
+			for _, c := range told {
+				c.Invalidate()
+			}
+		}()
+	}
 }
 
 func (m *cache) bring(e *entry) {
-	data, wasFresh, err := m.fetch(e.key.url)
+	r, err := m.fetch(e.key.url)
 	var src ui.ImageSource
 	size := int64(0)
-	if err == nil {
-		src, size, err = decode(data, e.key.side)
+	if err == nil && !e.preload {
+		src, size, err = safeDecode(r.data, e.key.side)
+		if err != nil && r.fallback != nil {
+			// A 200 of what's no picture, as a captive portal's page: what it
+			// had stands.
+			src, size, err = safeDecode(r.fallback, e.key.side)
+			r.store = nil
+		} else if err != nil && r.fromDisk {
+			// Spoiled: the next time asks the server.
+			if body, meta := m.paths(e.key.url); body != "" {
+				os.Remove(body)
+				os.Remove(meta)
+			}
+		}
+	} else if err == nil && r.store != nil && !isPicture(r.data) {
+		r.store = nil
+	}
+	m.mu.Lock()
+	gone := e.forgotten
+	m.mu.Unlock()
+	if err == nil && r.store != nil && !gone {
+		r.store()
 	}
 	m.mu.Lock()
 	e.loading = false
-	e.src, e.err, e.size = src, err, size
 	now := m.now()
-	if err != nil {
-		e.failed = now
-	} else {
-		e.came, e.fresh = now, wasFresh && now.Sub(e.used) < 50*time.Millisecond
+	switch {
+	case gone || e.preload:
+		if m.entries[e.key] == e {
+			delete(m.entries, e.key)
+		}
+	case err != nil:
+		e.err, e.failed = err, now
+	default:
+		e.src, e.err, e.size = src, nil, size
+		e.came, e.fresh = now, r.fromDisk && now.Sub(e.used) < 50*time.Millisecond
 		m.held += size
 		m.evictLocked(e)
 	}
@@ -257,6 +334,29 @@ func (m *cache) bring(e *entry) {
 	for _, c := range waiters {
 		c.Invalidate()
 	}
+}
+
+// isPicture reports whether data can be a picture, without decoding it all.
+func isPicture(data []byte) bool {
+	if _, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		return true
+	}
+	return bytes.Contains(data[:min(len(data), 4096)], []byte("<svg"))
+}
+
+// safeDecode decodes what came from anywhere, which a decoder may panic on, and
+// which may say it's enormous: a small file can ask for gigabytes, which would
+// end the app.
+func safeDecode(data []byte, side int) (src ui.ImageSource, size int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("netimage: decoding: %v", r)
+		}
+	}()
+	if c, _, cerr := image.DecodeConfig(bytes.NewReader(data)); cerr == nil && int64(c.Width)*int64(c.Height) > maxPixels {
+		return nil, 0, fmt.Errorf("netimage: %d×%d pixels is too many", c.Width, c.Height)
+	}
+	return decode(data, side)
 }
 
 // decode makes the bitmap: on this goroutine, off the main thread.
@@ -275,20 +375,43 @@ func decode(data []byte, side int) (ui.ImageSource, int64, error) {
 }
 
 // evictLocked lets go of the pictures shown longest ago, down to the limit, but
-// keep, which just came.
+// keep, which just came, and what showed a moment ago: pictures on screen that
+// don't fit the limit go over it, rather than each pushing out the next for good.
 func (m *cache) evictLocked(keep *entry) {
 	if m.held <= m.limit {
 		return
 	}
+	now := m.now()
+	for _, e := range m.heldOldestFirstLocked() {
+		if m.held <= m.limit || now.Sub(e.used) < onScreen {
+			return
+		}
+		if e != keep {
+			m.held -= e.size
+			delete(m.entries, e.key)
+		}
+	}
+}
+
+func (m *cache) heldOldestFirstLocked() []*entry {
 	var held []*entry
 	for _, e := range m.entries {
-		if e.src != nil && e != keep {
+		if e.src != nil {
 			held = append(held, e)
 		}
 	}
 	slices.SortFunc(held, func(a, b *entry) int { return a.used.Compare(b.used) })
-	for _, e := range held {
-		if m.held <= m.limit {
+	return held
+}
+
+// dropMemory lets go of the oldest three quarters. What's on screen is the last
+// to go: a window that hasn't built lately still shows it, and would flicker.
+func (m *cache) dropMemory() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	target := m.held / 4
+	for _, e := range m.heldOldestFirstLocked() {
+		if m.held <= target {
 			return
 		}
 		m.held -= e.size
@@ -296,28 +419,8 @@ func (m *cache) evictLocked(keep *entry) {
 	}
 }
 
-// dropMemory lets go of all the pictures not on screen.
-func (m *cache) dropMemory() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	now := m.now()
-	for k, e := range m.entries {
-		if e.src != nil && now.Sub(e.used) > time.Second {
-			m.held -= e.size
-			delete(m.entries, k)
-		}
-	}
-}
-
 func (m *cache) forget(url string) {
-	m.mu.Lock()
-	for k, e := range m.entries {
-		if k.url == url && !e.loading {
-			m.held -= e.size
-			delete(m.entries, k)
-		}
-	}
-	m.mu.Unlock()
+	m.dropLocked(func(k key) bool { return k.url == url })
 	if body, meta := m.paths(url); body != "" {
 		os.Remove(body)
 		os.Remove(meta)
@@ -325,16 +428,25 @@ func (m *cache) forget(url string) {
 }
 
 func (m *cache) clear() {
-	m.mu.Lock()
-	for k, e := range m.entries {
-		if !e.loading {
-			m.held -= e.size
-			delete(m.entries, k)
-		}
-	}
-	m.mu.Unlock()
+	m.dropLocked(func(key) bool { return true })
 	if dir := m.directory(); dir != "" {
 		os.RemoveAll(dir)
+	}
+}
+
+// dropLocked lets go of the entries match says: those downloading finish for
+// nothing, keeping nothing, as after logging out.
+func (m *cache) dropLocked(match func(key) bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, e := range m.entries {
+		if !match(k) {
+			continue
+		}
+		e.forgotten = true
+		m.held -= e.size
+		e.size = 0
+		delete(m.entries, k)
 	}
 }
 
@@ -368,10 +480,21 @@ type metadata struct {
 	FreshUntil   time.Time `json:"freshUntil"`
 }
 
+// fetched is what fetch found.
+type fetched struct {
+	data []byte
+	// fromDisk says it took no download; store writes it to disk, once it's
+	// known to be a picture; fallback is the disk's copy, older, while data is
+	// new.
+	fromDisk bool
+	store    func()
+	fallback []byte
+}
+
 // fetch returns the picture's bytes, from disk while they're fresh, asking the
-// server whether they changed once they aren't. wasFresh says it needed no
-// network. A phone offline shows what it has, however old.
-func (m *cache) fetch(url string) (data []byte, wasFresh bool, err error) {
+// server whether they changed once they aren't. A phone offline shows what it
+// has, however old.
+func (m *cache) fetch(url string) (fetched, error) {
 	body, metaPath := m.paths(url)
 	var meta metadata
 	var cached []byte
@@ -382,10 +505,11 @@ func (m *cache) fetch(url string) (data []byte, wasFresh bool, err error) {
 				json.Unmarshal(raw, &meta)
 			}
 			if m.now().Before(meta.FreshUntil) {
-				return cached, true, nil
+				return fetched{data: cached, fromDisk: true}, nil
 			}
 		}
 	}
+	stale := fetched{data: cached, fromDisk: true}
 	m.mu.Lock()
 	client := m.client
 	m.mu.Unlock()
@@ -396,7 +520,7 @@ func (m *cache) fetch(url string) (data []byte, wasFresh bool, err error) {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, false, err
+		return fetched{}, err
 	}
 	if cached != nil {
 		if meta.ETag != "" {
@@ -409,9 +533,9 @@ func (m *cache) fetch(url string) (data []byte, wasFresh bool, err error) {
 	res, err := client.Do(req)
 	if err != nil {
 		if cached != nil {
-			return cached, false, nil
+			return stale, nil
 		}
-		return nil, false, err
+		return fetched{}, err
 	}
 	defer res.Body.Close()
 	switch {
@@ -424,24 +548,29 @@ func (m *cache) fetch(url string) (data []byte, wasFresh bool, err error) {
 			next.LastModified = meta.LastModified
 		}
 		m.writeMeta(metaPath, next)
-		return cached, false, nil
+		return stale, nil
 	case res.StatusCode != http.StatusOK:
 		if cached != nil && res.StatusCode >= 500 {
-			return cached, false, nil
+			return stale, nil
 		}
-		return nil, false, fmt.Errorf("netimage: %s: %s", url, res.Status)
+		return fetched{}, fmt.Errorf("netimage: %s: %s", url, res.Status)
 	}
-	data, err = io.ReadAll(res.Body)
+	data, err := io.ReadAll(io.LimitReader(res.Body, maxBytes+1))
+	if err == nil && len(data) > maxBytes {
+		err = fmt.Errorf("netimage: %s is larger than %d bytes", url, maxBytes)
+	}
 	if err != nil {
 		if cached != nil {
-			return cached, false, nil
+			return stale, nil
 		}
-		return nil, false, err
+		return fetched{}, err
 	}
+	r := fetched{data: data, fallback: cached}
 	if body != "" && !noStore(res) {
-		m.store(body, metaPath, data, m.metadataOf(res))
+		meta := m.metadataOf(res)
+		r.store = func() { m.store(body, metaPath, data, meta) }
 	}
-	return data, false, nil
+	return r, nil
 }
 
 func noStore(res *http.Response) bool {

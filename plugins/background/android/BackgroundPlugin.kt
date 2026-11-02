@@ -34,6 +34,14 @@ class BackgroundPlugin : MyGoPlugin {
             }
             "schedule" -> {
                 val name = args.optString("name")
+                // The same again, as each launch asks: what's scheduled stands.
+                // Replacing it would put it off, or stop the task that started
+                // this very process.
+                val options = args.toString()
+                if (prefs().getString(name, null) == options) {
+                    reply.success(null)
+                    return
+                }
                 val every = args.optDouble("every", 0.0)
                 val delay = (args.optDouble("delay", 0.0) * 1000).toLong()
                 val c = Constraints.Builder()
@@ -43,17 +51,20 @@ class BackgroundPlugin : MyGoPlugin {
                 val data = Data.Builder().putString("name", name).build()
                 if (every > 0) {
                     val r = PeriodicWorkRequest.Builder(MyGoWorker::class.java, (every * 1000).toLong(), TimeUnit.MILLISECONDS)
-                        .setConstraints(c).setInputData(data).setInitialDelay(delay, TimeUnit.MILLISECONDS).build()
-                    wm.enqueueUniquePeriodicWork(prefix + name, ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE, r)
+                        .setConstraints(c).setInputData(data).setInitialDelay(delay, TimeUnit.MILLISECONDS)
+                        .addTag(MyGoWorker.PERIODIC).build()
+                    wm.enqueueUniquePeriodicWork(prefix + name, ExistingPeriodicWorkPolicy.UPDATE, r)
                 } else {
                     val r = OneTimeWorkRequest.Builder(MyGoWorker::class.java)
                         .setConstraints(c).setInputData(data).setInitialDelay(delay, TimeUnit.MILLISECONDS).build()
                     wm.enqueueUniqueWork(prefix + name, ExistingWorkPolicy.REPLACE, r)
                 }
+                prefs().edit().putString(name, options).apply()
                 reply.success(null)
             }
             "cancel" -> {
                 wm.cancelUniqueWork(prefix + args.optString("name"))
+                prefs().edit().remove(args.optString("name")).apply()
                 reply.success(null)
             }
             "done" -> {
@@ -83,9 +94,17 @@ class BackgroundPlugin : MyGoPlugin {
             return id
         }
 
+        /** The system's time ran out: what never began stays unbegun. */
         internal fun stop(id: Long) {
-            PluginHost.emit("background", "stop", mapOf("run" to id))
             runs.remove(id)
+            if (!waiting.removeAll { it["run"] == id }) PluginHost.emit("background", "stop", mapOf("run" to id))
+        }
+
+        internal fun prefs() = PluginHost.context.getSharedPreferences("mygo.background", Context.MODE_PRIVATE)
+
+        /** A task that runs once is done with: it may be scheduled again. */
+        internal fun finished(name: String) {
+            prefs().edit().remove(name).apply()
         }
     }
 }
@@ -94,10 +113,10 @@ class BackgroundPlugin : MyGoPlugin {
 class MyGoWorker(context: Context, params: WorkerParameters) : Worker(context, params) {
     @Volatile private var run = 0L
     private val main = Handler(Looper.getMainLooper())
+    private val latch = CountDownLatch(1)
 
     override fun doWork(): Result {
         val name = inputData.getString("name") ?: return Result.failure()
-        val latch = CountDownLatch(1)
         var ok = false
         main.post {
             HostImpl.startHeadless(applicationContext)
@@ -111,11 +130,19 @@ class MyGoWorker(context: Context, params: WorkerParameters) : Worker(context, p
             onStopped()
             return Result.retry()
         }
-        return if (ok) Result.success() else Result.retry()
+        if (!ok) return Result.retry()
+        // What repeats stays on the list, of which this run is one.
+        if (!tags.contains(MyGoWorker.PERIODIC)) main.post { BackgroundPlugin.finished(name) }
+        return Result.success()
     }
 
     override fun onStopped() {
         val id = run
         if (id != 0L) main.post { BackgroundPlugin.stop(id) }
+        latch.countDown() // WorkManager no longer waits for this thread
+    }
+
+    companion object {
+        const val PERIODIC = "mygo.periodic"
     }
 }

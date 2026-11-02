@@ -12,10 +12,14 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 )
+
+// nativeName is what a plugin's C library may be named, which paths are made of.
+var nativeName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 
 // pluginNative is C code of a plugin (mobile.native in its mygo-plugin.json),
 // which the CLI compiles for the phone at hand, with the compiler phones need
@@ -72,13 +76,27 @@ func (n *pluginNative) compile(ctx context.Context, p *mobilePlugin, t nativeTar
 	if n.Archive == nil && len(sources) == 0 {
 		return "", fmt.Errorf("plugin %s: mobile.native has no sources", p.ID)
 	}
+	if !nativeName.MatchString(n.Name) {
+		return "", fmt.Errorf("plugin %s: mobile.native.name %q must be a name", p.ID, n.Name)
+	}
 	h := sha256.New()
 	spec, err := json.Marshal([]any{n, t.key, t.compiler, t.args})
 	if err != nil {
 		return "", err
 	}
 	h.Write(spec)
+	// With the headers beside them, which they may include.
+	hashed := slices.Clone(sources)
+	seen := map[string]bool{}
 	for _, f := range sources {
+		dir := filepath.Dir(f)
+		if !seen[dir] {
+			seen[dir] = true
+			headers, _ := filepath.Glob(filepath.Join(dir, "*.h"))
+			hashed = append(hashed, headers...)
+		}
+	}
+	for _, f := range hashed {
 		data, err := os.ReadFile(f)
 		if err != nil {
 			return "", err
@@ -153,11 +171,14 @@ func (n *pluginNative) extract(dir string) ([]string, error) {
 		if f.FileInfo().IsDir() || !slices.Contains(a.Files, name) {
 			continue
 		}
+		if !filepath.IsLocal(name) || filepath.Base(name) != name {
+			return nil, fmt.Errorf("%s: a file named %q", a.URL, name)
+		}
 		r, err := f.Open()
 		if err != nil {
 			return nil, err
 		}
-		to := filepath.Join(dir, name) // the base of a name: no way out of dir
+		to := filepath.Join(dir, name)
 		w, err := os.Create(to)
 		if err == nil {
 			_, err = io.Copy(w, r)
@@ -185,9 +206,6 @@ func (ps mobilePlugins) embedFrameworks(ctx context.Context, t *iosToolchain, tk
 		n := p.Native
 		if n == nil {
 			continue
-		}
-		if !pluginName.MatchString(strings.ReplaceAll(n.Name, "-", "_")) {
-			return fmt.Errorf("plugin %s: mobile.native.name %q must be a name", p.ID, n.Name)
 		}
 		lib, err := n.compile(ctx, p, nativeTarget{
 			key:      "ios-" + t.target,

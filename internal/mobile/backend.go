@@ -71,6 +71,8 @@ type Backend struct {
 	// ready is set once the core heard Ready, background while the app is
 	// in the background.
 	ready, background bool
+	// startedHidden says it started out of sight, until it first shows.
+	startedHidden bool
 
 	infoMu sync.Mutex
 	infoOK bool
@@ -147,6 +149,7 @@ func (b *Backend) Init(h platform.AppHandler, _ platform.AppOptions) error {
 	b.dark = t.Dark
 	// Started for a background task: no frames until the user opens it.
 	b.background = b.appInfo().Background
+	b.startedHidden = b.background
 	return nil
 }
 

@@ -298,3 +298,119 @@ func TestImageInView(t *testing.T) {
 		return src != nil
 	})
 }
+
+// A page that answers for the picture, as a captive portal's, leaves what the
+// disk has.
+func TestCaptivePortal(t *testing.T) {
+	data := picture(t, 8, 8)
+	var portal atomic.Bool
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=1")
+		if portal.Load() {
+			w.Write([]byte("<html>Sign in to the Wi-Fi</html>"))
+			return
+		}
+		w.Write(data)
+	}))
+	defer s.Close()
+	m, clock := testCache(t)
+	get(t, m, s.URL, 100)
+	portal.Store(true)
+	next, c2 := testCache(t)
+	next.dir = m.dir
+	*c2 = clock.Add(time.Hour)
+	get(t, next, s.URL, 100)
+	idle(t, next)
+	// And it's still there for the run after, the portal gone or not.
+	body, _ := m.paths(s.URL)
+	kept, err := os.ReadFile(body)
+	if err != nil || !bytes.Equal(kept, data) {
+		t.Errorf("the disk holds %d bytes, %v", len(kept), err)
+	}
+}
+
+// A small file that says it's enormous fails, rather than ending the app.
+func TestEnormousPicture(t *testing.T) {
+	// A PNG's header says its size; what follows doesn't matter to the check.
+	data := picture(t, 8, 8)
+	data[16], data[17], data[18], data[19] = 0, 0, 0x75, 0x30 // 30000
+	data[20], data[21], data[22], data[23] = 0, 0, 0x75, 0x30
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
+	defer s.Close()
+	m, _ := testCache(t)
+	wait.Until(t, "it to fail", func() bool {
+		_, _, err := m.request(s.URL, 100, nil)
+		return err != nil
+	})
+}
+
+// Pictures on screen that don't fit the limit stay, rather than each pushing out
+// the next for good.
+func TestOnScreenStays(t *testing.T) {
+	data := picture(t, 100, 100)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
+	defer s.Close()
+	m, _ := testCache(t)
+	m.limit = 100 * 100 * 4 // one
+	for i := range 3 {
+		get(t, m, fmt.Sprintf("%s/%d", s.URL, i), 100)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.entries) != 3 {
+		t.Errorf("%d of 3 on screen stay", len(m.entries))
+	}
+}
+
+// What's let go of as it downloads, as on logging out, stays off the disk.
+func TestForgetWhileDownloading(t *testing.T) {
+	data := picture(t, 8, 8)
+	arrived, finish := make(chan struct{}), make(chan struct{})
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-finish
+		w.Write(data)
+	}))
+	defer s.Close()
+	m, _ := testCache(t)
+	m.request(s.URL, 100, nil)
+	wait.For(t, "the download", arrived)
+	m.clear()
+	close(finish)
+	idle(t, m)
+	body, _ := m.paths(s.URL)
+	if fileThere(body) {
+		t.Error("it went to disk")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.entries) != 0 || m.held != 0 {
+		t.Errorf("%d entries, %d bytes", len(m.entries), m.held)
+	}
+}
+
+// Preloading fills the disk, not memory, and gives up on nothing however long it
+// waits for a worker.
+func TestPreload(t *testing.T) {
+	data := picture(t, 8, 8)
+	var hits atomic.Int32
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Cache-Control", "max-age=3600")
+		w.Write(data)
+	}))
+	defer s.Close()
+	m, _ := testCache(t)
+	m.preload(s.URL)
+	idle(t, m)
+	m.mu.Lock()
+	held, n := m.held, len(m.entries)
+	m.mu.Unlock()
+	if held != 0 || n != 0 {
+		t.Errorf("preloading holds %d bytes, %d entries", held, n)
+	}
+	get(t, m, s.URL, 100)
+	if hits.Load() != 1 {
+		t.Errorf("downloaded %d times", hits.Load())
+	}
+}

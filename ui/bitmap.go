@@ -74,20 +74,16 @@ func DecodeBitmap(data []byte) (*Bitmap, error) {
 
 // DecodeBitmapScaled decodes as DecodeBitmap, to a bitmap no longer on either
 // side than maxSide pixels: a list of thumbnails of photos holds the memory of
-// its thumbnails, not of its photos. It doesn't enlarge.
+// its thumbnails, not of its photos. It doesn't enlarge. Unlike DecodeBitmap it
+// doesn't keep data, so that its bitmap holds only its pixels, and
+// ReleasePixels leaves them.
 func DecodeBitmapScaled(data []byte, maxSide int) (*Bitmap, error) {
-	decode := func() (*scene.Image, error) {
-		s, err := decodeImage(data)
-		if err != nil {
-			return nil, err
-		}
-		return shrinkImage(s, maxSide), nil
-	}
-	s, err := decode()
+	s, err := decodeImage(data)
 	if err != nil {
 		return nil, err
 	}
-	return &Bitmap{img: s, w: s.W, h: s.H, decode: decode}, nil
+	s = shrinkImage(s, maxSide)
+	return &Bitmap{img: s, w: s.W, h: s.H}, nil
 }
 
 // shrinkImage averages each pixel of the result over the pixels it covers.

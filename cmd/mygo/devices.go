@@ -57,7 +57,10 @@ const toolTimeout = 15 * time.Second
 func toolOutput(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), toolTimeout)
 	defer cancel()
-	return exec.CommandContext(ctx, name, args...).Output()
+	cmd := exec.CommandContext(ctx, name, args...)
+	// What it started may hold its output open past the timeout.
+	cmd.WaitDelay = time.Second
+	return cmd.Output()
 }
 
 func runDevices(args []string) error {

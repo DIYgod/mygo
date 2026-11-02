@@ -103,16 +103,20 @@ const stretchShare = 0.5
 // top, and past the bottom up from the bottom. Its set is false without one.
 func stretchOf(e *node) (t Transform, ox, oy float32) {
 	s := e.st
-	if s.refresh != nil || (s.over == [2]float32{}) || e.w <= 0 || e.h <= 0 {
+	over := s.over
+	if s.refresh != nil && over[1] < 0 {
+		over[1] = 0 // the indicator comes down instead
+	}
+	if over == [2]float32{} || e.w <= 0 || e.h <= 0 {
 		return Transform{}, 0, 0
 	}
-	sx := 1 + abs32(s.over[0])/e.w*stretchShare
-	sy := 1 + abs32(s.over[1])/e.h*stretchShare
+	sx := 1 + abs32(over[0])/e.w*stretchShare
+	sy := 1 + abs32(over[1])/e.h*stretchShare
 	ox, oy = e.x, e.y
-	if s.over[0] > 0 {
+	if over[0] > 0 {
 		ox += e.w
 	}
-	if s.over[1] > 0 {
+	if over[1] > 0 {
 		oy += e.h
 	}
 	return Scaling(sx, sy), ox, oy

@@ -19,8 +19,8 @@
 // When a task runs is the system's choice: after Delay, around Every, with what
 // it knows of the battery and of how much the user opens the app. iOS gives a
 // task about 30 seconds, or minutes with Long; Android about 10 minutes. A
-// handler stops when its context ends. Tasks outlive the process and reboots
-// until Cancel.
+// handler stops when its context ends. A repeating task outlives the process and
+// reboots until Cancel; one that runs once does until it succeeds.
 package background
 
 import (
@@ -42,9 +42,10 @@ type Options struct {
 	Every time.Duration
 	// Delay is the least it waits before it runs the first time.
 	Delay time.Duration
-	// Network waits for a network.
+	// Network waits for a network; on iOS, for Long tasks only, as the system
+	// decides when others run.
 	Network bool
-	// Charging waits for the phone to charge.
+	// Charging waits for the phone to charge; on iOS, for Long tasks only.
 	Charging bool
 	// Long asks for minutes, which on iOS come rarely, overnight and charging,
 	// rather than half a minute.
@@ -55,24 +56,13 @@ var tasks struct {
 	sync.Mutex
 	handlers map[string]func(context.Context) error
 	running  map[int64]context.CancelFunc
-	wired    bool
 }
 
-// Handle says what a task does, before App.Run. It runs on a goroutine of its
-// own, off the main thread. A task whose handler returns an error runs again
-// later, on Android.
-func Handle(name string, fn func(ctx context.Context) error) {
-	tasks.Lock()
-	defer tasks.Unlock()
-	if tasks.handlers == nil {
-		tasks.handlers = map[string]func(context.Context) error{}
-		tasks.running = map[int64]context.CancelFunc{}
-	}
-	tasks.handlers[name] = fn
-	if tasks.wired {
-		return
-	}
-	tasks.wired = true
+// init listens, whether the app handles a task or no longer does, for the system
+// to hear back about what it still has on its list.
+func init() {
+	tasks.handlers = map[string]func(context.Context) error{}
+	tasks.running = map[int64]context.CancelFunc{}
 	p := mygo.Native(pluginID)
 	p.On("run", func(data []byte) {
 		var e runEvent
@@ -87,17 +77,31 @@ func Handle(name string, fn func(ctx context.Context) error) {
 		}
 	})
 	mygo.App.WhenReady(func() {
-		// What the system started the process for waited for these handlers.
+		if !p.Available() {
+			return
+		}
+		// What the system started the process for waited for this.
 		go func() {
-			if err := p.Call(context.Background(), "ready", nil, nil); err != nil && p.Available() {
+			if err := p.Call(context.Background(), "ready", nil, nil); err != nil {
 				log.Printf("background: %v", err)
 			}
 		}()
 	})
 }
 
-// Schedule asks the system to run a task, in place of one of its name. Call it
-// off the main goroutine, or with go.
+// Handle says what a task does, before App.Run. It runs on a goroutine of its
+// own, off the main thread. A task whose handler returns an error runs again
+// later.
+func Handle(name string, fn func(ctx context.Context) error) {
+	tasks.Lock()
+	defer tasks.Unlock()
+	tasks.handlers[name] = fn
+}
+
+// Schedule asks the system to run a task, in place of one of its name with other
+// options: with the same ones, as an app does each time it starts, nothing
+// changes, so that a task isn't put off again and again, nor stopped as it runs.
+// Call it off the main goroutine, or with go.
 func Schedule(ctx context.Context, name string, o Options) error {
 	return mygo.Native(pluginID).Call(ctx, "schedule", map[string]any{
 		"name": name, "every": o.Every.Seconds(), "delay": o.Delay.Seconds(),

@@ -892,7 +892,11 @@ func (p *profile) signingEntitlements(c *Config) (map[string]any, error) {
 		ent[k] = v
 	}
 	// A wildcard profile's app ID becomes the app's.
-	ent["application-identifier"] = p.team + "." + c.Identifier
+	prefix, _, ok := strings.Cut(p.appID, ".")
+	if !ok {
+		prefix = p.team // older app IDs have a prefix of their own
+	}
+	ent["application-identifier"] = prefix + "." + c.Identifier
 	delete(ent, associatedDomainsKey)
 	if domains := c.IOS.associatedDomains(); len(domains) > 0 {
 		if !p.allowsAssociatedDomains() {
