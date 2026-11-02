@@ -73,7 +73,7 @@ type inspector struct {
 	// it leaves the content. tab is the panel's tab, side the tab of the
 	// sidebar below the tree, split the height of the tree.
 	panel       uint64
-	width, appW float32
+	width, appW, appH float32
 	tab, side   int
 	split       float32
 	// nodes are the elements of the last frame, in the order of the tree,
@@ -156,12 +156,27 @@ func (in *inspector) contentWidth(w float32) float32 {
 	if in.width == 0 {
 		in.width = inspectorWidth
 	}
-	pw := min(max(in.width, 260), w-160)
-	if w < 520 {
-		pw = w / 2
+	if w < inspectorNarrow {
+		in.appW = w // below, on a phone
+		return w
 	}
+	pw := min(max(in.width, 260), w-160)
 	in.appW = max(w-pw, 0)
 	return in.appW
+}
+
+// inspectorNarrow is the width of a window below which the panel docks along the
+// bottom, as side by side neither would be of use.
+const inspectorNarrow = 520
+
+// contentHeight returns the height the window w×h leaves the content.
+func (in *inspector) contentHeight(w, h float32) float32 {
+	if !in.open || w >= inspectorNarrow {
+		in.appH = h
+		return h
+	}
+	in.appH = max(h*0.45, 0)
+	return in.appH
 }
 
 // lap notes how long the frame's phase took since the last lap (-1 starts
@@ -254,7 +269,7 @@ func (in *inspector) pointer(rt *engine, ev platform.SurfaceEvent, x, y float32)
 	case in.swallow && ev.Kind == platform.PointerUp:
 		in.swallow = false
 		return true
-	case !in.picking || x >= in.appW:
+	case !in.picking || x >= in.appW || y >= in.appH:
 		return false
 	}
 	switch ev.Kind {

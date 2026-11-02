@@ -65,6 +65,8 @@ type window struct {
 	// tabs is the bar of tabs the window is on, in tab tabIndex.
 	tabs     *tabBar
 	tabIndex int
+	// devTools says its developer tools are on, in a development build.
+	devTools bool
 	// parent is the surface's window this one shows under, as a web view in
 	// native UI, and children those it holds.
 	parent   *window
@@ -97,7 +99,7 @@ func (b *Backend) newWindow(opts *platform.WindowOptions, h platform.WindowHandl
 // viewType a plugin's native view.
 func (b *Backend) makeWindow(opts *platform.WindowOptions, h platform.WindowHandler, parent *window, viewType, viewArgs string) (*window, error) {
 	b.nextID++
-	w := &window{b: b, id: b.nextID, h: h, opts: *opts, title: opts.Title, zoom: 1, scale: 1, parent: parent}
+	w := &window{b: b, id: b.nextID, h: h, opts: *opts, title: opts.Title, zoom: 1, scale: 1, parent: parent, devTools: opts.DevTools}
 	if opts.Zoom > 0 {
 		w.zoom = opts.Zoom
 	}

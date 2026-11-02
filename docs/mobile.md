@@ -508,6 +508,10 @@ devices alike, with [the automation plugin](plugins/automation.md#on-phones): th
 read the elements on screen, act on them, send fingers and text, capture the
 screen and wait for it to settle.
 
+Tap with four fingers to open the inspector of native UI in a development build:
+along the bottom of a phone, with the elements, their styles, frame times and
+issues, as F12 opens it on a desktop.
+
 ## How apps behave on phones
 
 - **One screen**: the window shown last fills the screen, above those

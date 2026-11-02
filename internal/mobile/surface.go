@@ -294,6 +294,13 @@ func (s *surface) touch(e *wire.TouchEvent) {
 	switch e.Phase {
 	case "down":
 		s.fingers[e.Pointer] = [2]float64{e.X, e.Y}
+		if len(s.fingers) == 4 && s.w.devTools {
+			// Four fingers open the inspector, as F12 does: a phone has no such
+			// key, and the system and games keep fewer fingers to themselves.
+			s.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.KeyF12})
+			s.send(platform.SurfaceEvent{Kind: platform.KeyReleased, Key: platform.KeyF12})
+			return
+		}
 		if len(s.fingers) == 2 {
 			s.pinchDist = s.spread()
 			if s.touching {

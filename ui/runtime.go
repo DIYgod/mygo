@@ -651,7 +651,7 @@ func (rt *engine) runFrame() {
 		}
 		rt.nextRegs = rt.nextRegs[:0]
 		clear(rt.kept)
-		rt.c.reset(now, appW, h)
+		rt.c.reset(now, appW, rt.insp.contentHeight(w, h))
 		rt.view(&rt.c)
 		if rt.closing {
 			// The view closed the window, as a close button does: the
@@ -701,7 +701,7 @@ func (rt *engine) runFrame() {
 	if insetRoot != nil {
 		insetRoot(rt, root)
 	}
-	layoutTree(root, appW, h)
+	layoutTree(root, appW, rt.insp.contentHeight(w, h))
 	if extendScrolls != nil {
 		extendScrolls(rt, root, h)
 	}

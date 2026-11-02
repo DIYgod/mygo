@@ -298,3 +298,36 @@ func TestHeldViews(t *testing.T) {
 		t.Errorf("closed %v, children %d", child.closed, len(w.children))
 	}
 }
+
+// Four fingers open the inspector where developer tools are on, and do nothing
+// in a release, whose apps may take them.
+func TestFourFingers(t *testing.T) {
+	b, h := startBackend(t)
+	w, wh := surfaceWindow(t, b, h)
+	touch := func(pointer int) {
+		onMain(b, func() {
+			w.s.touch(&wire.TouchEvent{ID: w.id, Pointer: pointer, Phase: "down", Kind: "touch", X: float64(pointer) * 40, Y: 100})
+		})
+	}
+	lift := func(pointer int) {
+		onMain(b, func() {
+			w.s.touch(&wire.TouchEvent{ID: w.id, Pointer: pointer, Phase: "up", Kind: "touch", X: float64(pointer) * 40, Y: 100})
+		})
+	}
+	for p := 1; p <= 4; p++ {
+		touch(p)
+	}
+	if n := wh.kinds(platform.KeyPressed); n != 0 {
+		t.Errorf("without developer tools, %d keys", n)
+	}
+	for p := 1; p <= 4; p++ {
+		lift(p)
+	}
+	onMain(b, func() { w.devTools = true })
+	for p := 1; p <= 4; p++ {
+		touch(p)
+	}
+	if n := wh.kinds(platform.KeyPressed); n != 1 {
+		t.Errorf("with them, %d keys", n)
+	}
+}
