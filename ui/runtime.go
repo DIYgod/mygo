@@ -1242,7 +1242,11 @@ func (rt *engine) commitElement(e *node, clip Rect, hidden bool) {
 	}
 	e.world = e.transformAt(e.x, e.y)
 	if e.parent != nil && e != e.c.overlay {
-		e.world = e.parent.world.Mul(e.world)
+		w := e.parent.world
+		if contentStretch != nil && e.parent.scrolls() {
+			w = contentStretch(w, e.parent)
+		}
+		e.world = w.Mul(e.world)
 	}
 	s.world = e.world
 	s.clips = e.flags&(flagClipX|flagClipY|flagScrollX|flagScrollY) != 0

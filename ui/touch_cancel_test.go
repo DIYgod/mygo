@@ -185,3 +185,45 @@ func TestPullToRefreshGoesWithIt(t *testing.T) {
 		t.Error("a pull on what took its place refreshed it")
 	}
 }
+
+// Android's stretch grows the content where it is, from the end away from the
+// pull: nothing moves in the layout, and it goes back to nothing.
+func TestTouchStretch(t *testing.T) {
+	defer func(k overscroll) { overscrollKind = k }(overscrollKind)
+	overscrollKind = overscrollStretch
+	var top float32
+	var el *node
+	tt := coreNewTester(func(c *context) {
+		el = coreScroll(c).Fill()
+		el.Children(func() {
+			top = coreBox(c).Height(1000).Shrink(0).st.y
+		})
+	}, 200, 200)
+	tt.Frame()
+	tt.TouchDown(100, 50)
+	tt.Advance(time.Millisecond)
+	tt.TouchMove(100, 60)
+	tt.Advance(16 * time.Millisecond)
+	tt.TouchMove(100, 150)
+	tt.Frame()
+	if top != 0 {
+		t.Errorf("the layout moved: %v", top)
+	}
+	over := el.st.over[1]
+	if over >= 0 {
+		t.Fatalf("pulled past the top: %v", over)
+	}
+	tr, ox, oy := stretchOf(el)
+	if !tr.set() || ox != el.x || oy != el.y {
+		t.Errorf("stretch %v around %v, %v of %v, %v", tr.set(), ox, oy, el.x, el.y)
+	}
+	tt.Advance(200 * time.Millisecond)
+	tt.TouchUp(100, 150)
+	for range 200 {
+		tt.Advance(16 * time.Millisecond)
+	}
+	tt.Frame()
+	if tr, _, _ := stretchOf(el); tr.set() {
+		t.Error("it stays stretched")
+	}
+}

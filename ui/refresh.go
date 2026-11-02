@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/egoist/mygo/internal/scene"
 	"math"
 	"time"
 )
@@ -75,10 +76,58 @@ func (s *RefreshState) movesContent() bool { return overscrollKind != overscroll
 
 // contentOver is how far the content shows past its ends, down.
 func (s *state) contentOver() float32 {
+	if overscrollKind == overscrollStretch {
+		return 0 // it stretches where it is (stretchOf)
+	}
 	if s.refresh != nil && !s.refresh.movesContent() {
 		return 0
 	}
 	return s.over[1]
+}
+
+// contentOverX is how far the content shows past its ends, across.
+func (s *state) contentOverX() float32 {
+	if overscrollKind == overscrollStretch {
+		return 0
+	}
+	return s.over[0]
+}
+
+// stretchShare is how much of the distance pulled past its end the content
+// grows by, along the length of the view: as much as Android's, at the limits
+// of setOver.
+const stretchShare = 0.5
+
+// stretchOf is the transform of what Android's stretch shows inside e, with its
+// pivot at the end away from the pull: content past the top grows down from the
+// top, and past the bottom up from the bottom. Its set is false without one.
+func stretchOf(e *node) (t Transform, ox, oy float32) {
+	s := e.st
+	if s.refresh != nil || (s.over == [2]float32{}) || e.w <= 0 || e.h <= 0 {
+		return Transform{}, 0, 0
+	}
+	sx := 1 + abs32(s.over[0])/e.w*stretchShare
+	sy := 1 + abs32(s.over[1])/e.h*stretchShare
+	ox, oy = e.x, e.y
+	if s.over[0] > 0 {
+		ox += e.w
+	}
+	if s.over[1] > 0 {
+		oy += e.h
+	}
+	return Scaling(sx, sy), ox, oy
+}
+
+// stretchPainter is stretchOf where Android's stretch is on.
+func stretchPainter(world scene.Affine, e *node) scene.Affine {
+	if overscrollKind != overscrollStretch {
+		return world
+	}
+	if t, ox, oy := stretchOf(e); t.set() {
+		m := Translation(-ox, -oy).Then(t).Then(Translation(ox, oy))
+		return world.Mul(m.flat())
+	}
+	return world
 }
 
 // touchIndicator returns how much a scroll indicator shows, from 0 to 1, as a
