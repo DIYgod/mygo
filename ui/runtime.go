@@ -406,12 +406,14 @@ type engine struct {
 	// focused editor its text starts at.
 	// bouncing lists the containers springing back from past their ends, and
 	// bounceAt is when they last moved; barsFadeAt until when indicators show.
-	bouncing   []uint64
-	dev        *devState
-	caught     []uint64
-	bounceAt   time.Time
-	barsFadeAt time.Time
-	ime        struct {
+	bouncing []uint64
+	// lastPointerTouch says the last pointer event was a finger's.
+	lastPointerTouch bool
+	dev              *devState
+	caught           []uint64
+	bounceAt         time.Time
+	barsFadeAt       time.Time
+	ime              struct {
 		state platform.TextInputState
 		base  int
 		// show counts the fingers that pressed the input with the focus,

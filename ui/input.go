@@ -33,6 +33,10 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 		// A press is of no element until countPress finds it one.
 		rt.lastPress.prev, rt.lastPress.id = rt.lastPress.id, 0
 	}
+	switch ev.Kind {
+	case platform.PointerMove, platform.PointerDown, platform.PointerUp:
+		rt.lastPointerTouch = ev.Touch
+	}
 	if rt.insp.pointer(rt, ev, x, y) {
 		return true
 	}

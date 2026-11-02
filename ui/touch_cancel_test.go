@@ -3,6 +3,8 @@ package ui
 import (
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/internal/platform"
 )
 
 // A finger the system takes away throws nothing, however fast it went.
@@ -225,5 +227,40 @@ func TestTouchStretch(t *testing.T) {
 	tt.Frame()
 	if tr, _, _ := stretchOf(el); tr.set() {
 		t.Error("it stays stretched")
+	}
+}
+
+// Scroll bars don't stay for a finger's hover, however it ended: a lift with no
+// word of leaving, or the system taking it. Only a pointer shows them by being there.
+func TestFingerShowsNoHoverBars(t *testing.T) {
+	var st *state
+	tt := coreNewTester(func(c *context) {
+		e := coreScroll(c).Fill()
+		st = e.st
+		e.Children(func() { coreBox(c).Height(1000).Shrink(0) })
+	}, 200, 200)
+	tt.Frame()
+	press := func(x, y float32) {
+		tt.send(platform.SurfaceEvent{Kind: platform.PointerMove, X: float64(x), Y: float64(y), Touch: true})
+		tt.send(platform.SurfaceEvent{Kind: platform.PointerDown, X: float64(x), Y: float64(y), Clicks: 1, Touch: true})
+	}
+	enableTouch()
+	press(100, 100)
+	tt.send(platform.SurfaceEvent{Kind: platform.PointerUp, X: 100, Y: 100, Clicks: 1, Touch: true}) // no leave
+	tt.Frame()
+	if st.barsShown {
+		t.Error("after a lift, the bars stay")
+	}
+	press(100, 100)
+	tt.send(platform.SurfaceEvent{Kind: platform.PointerUp, X: -1e6, Y: -1e6, Touch: true, Canceled: true})
+	tt.Frame()
+	if st.barsShown {
+		t.Error("after a finger taken away, the bars stay")
+	}
+	// A mouse over it, as on a tablet, shows them.
+	tt.Move(100, 100)
+	tt.Frame()
+	if !st.barsShown {
+		t.Error("a pointer over it shows no bars")
 	}
 }

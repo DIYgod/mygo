@@ -22,6 +22,12 @@ func listen(path string) (net.Listener, error) {
 	if strings.HasPrefix(path, "@") {
 		return net.Listen("unix", path)
 	}
+	// A phone on a cable, whose files no socket of this computer reaches: anyone
+	// on its networks can reach the port too, so use it where you trust those,
+	// with a build that isn't a release, which has no plugin.
+	if addr, ok := strings.CutPrefix(path, "tcp:"); ok {
+		return net.Listen("tcp", addr)
+	}
 	if fi, err := os.Lstat(path); err == nil {
 		if fi.Mode().Type() != os.ModeSocket {
 			return nil, fmt.Errorf("%s exists and is not a socket", path)
