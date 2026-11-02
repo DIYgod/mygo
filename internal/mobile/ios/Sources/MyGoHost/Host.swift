@@ -42,6 +42,7 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
 
     func appInfo() -> AppInfoReply {
         var r = AppInfoReply()
+        r.background = UIApplication.shared.applicationState == .background // the system started it for a task
         let b = Bundle.main
         r.name = (b.object(forInfoDictionaryKey: "CFBundleDisplayName") ?? b.object(forInfoDictionaryKey: "CFBundleName")) as? String ?? ""
         r.version = b.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""

@@ -238,15 +238,38 @@ func (ps mobilePlugins) frameworks() []string {
 	return out
 }
 
+// expandIdentifier puts the app's identifier in v's strings.
+func expandIdentifier(v any, identifier string) any {
+	switch v := v.(type) {
+	case string:
+		return strings.ReplaceAll(v, "$(IDENTIFIER)", identifier)
+	case []any:
+		out := make([]any, len(v))
+		for i, x := range v {
+			out[i] = expandIdentifier(x, identifier)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, x := range v {
+			out[k] = expandIdentifier(x, identifier)
+		}
+		return out
+	}
+	return v
+}
+
 // infoPlist is what the plugins add to the app's Info.plist. Lists add up, as
-// the background modes that several ask for.
-func (ps mobilePlugins) infoPlist() map[string]any {
+// the background modes that several ask for. $(IDENTIFIER) in a string is the
+// app's, for what the system wants prefixed with it.
+func (ps mobilePlugins) infoPlist(identifier string) map[string]any {
 	out := map[string]any{}
 	for _, p := range ps {
 		if p.IOS == nil {
 			continue
 		}
 		for k, v := range p.IOS.InfoPlist {
+			v = expandIdentifier(v, identifier)
 			if list, ok := v.([]any); ok {
 				if old, ok := out[k].([]any); ok {
 					v = append(old, list...)

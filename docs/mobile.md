@@ -247,6 +247,7 @@ if it imports it, with its usage descriptions and permissions added to the app:
 | `permissionflow` | Whether the app may use the camera, the microphone, photos, contacts…, asking, and the system's settings |
 | `preferences` | Small values kept between runs, on every platform |
 | `sqlite` | SQLite with full-text search, 64-bit, compiled into the app |
+| `background` | Go code that runs while the app isn't open, as the system finds the time: BGTaskScheduler and WorkManager |
 
 ## Writing a plugin
 

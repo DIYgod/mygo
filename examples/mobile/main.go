@@ -16,6 +16,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/audio"
+	"github.com/egoist/mygo/plugins/background"
 	"github.com/egoist/mygo/plugins/biometrics"
 	"github.com/egoist/mygo/plugins/camera"
 	"github.com/egoist/mygo/plugins/imagepicker"
@@ -477,6 +478,14 @@ func (a *app) system(c *ui.Context) {
 					}
 					return st.String()
 				})
+				row("Run a task in the background", func(ctx context.Context) string {
+					if err := background.Schedule(ctx, "count", background.Options{Delay: 30 * time.Second}); err != nil {
+						return err.Error()
+					}
+					n := 0
+					preferences.Get("background runs", &n)
+					return fmt.Sprintf("due in 30 seconds, leave the app; it ran %d times", n)
+				})
 				row("What time is it", func(ctx context.Context) string {
 					return time.Now().Format("15:04 MST, Monday")
 				})
@@ -568,6 +577,13 @@ func (a *app) view(c *ui.Context) {
 }
 
 func main() {
+	// The system may start the app just for this, with nothing on screen.
+	background.Handle("count", func(ctx context.Context) error {
+		n := 0
+		preferences.Get("background runs", &n)
+		log.Printf("a task in the background, run %d", n+1)
+		return preferences.Set("background runs", n+1)
+	})
 	a := &app{wifi: true, when: time.Now(), results: map[string]string{}}
 	for i := range 30 {
 		a.rows = append(a.rows, fmt.Sprintf("Row %d", i+1))

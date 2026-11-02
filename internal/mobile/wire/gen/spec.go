@@ -26,7 +26,7 @@ var calls = []msg{
 		f("FilesDir", "string"), f("CacheDir", "string"), f("TempDir", "string"), f("DocumentsDir", "string"),
 		f("ResourcesDir", "string"),
 		f("Languages", "strings"), f("RegionLocale", "string"), f("FirstWeekday", "int"), f("HourCycle", "int"),
-		f("System", "string"), f("SystemVersion", "string"), f("Model", "string"), f("Restoring", "bool"),
+		f("System", "string"), f("SystemVersion", "string"), f("Model", "string"), f("Restoring", "bool"), f("Background", "bool"),
 	}},
 	{name: "TimeZone", doc: "the name of the system's time zone; any thread", wait: true, reply: []field{f("ID", "string")}},
 	{name: "Theme", doc: "the appearance and the accessibility preferences", wait: true, reply: []field{

@@ -71,11 +71,12 @@ object HostImpl : HostCalls {
     private const val ASK_NOTIFICATIONS = 0x6d7a
     private var pendingNotes = ArrayList<NotifyCall>()
 
-    fun attach(a: Activity) {
-        activity = a
-        if (!::app.isInitialized) {
-            app = a.applicationContext
-            context = MutableContextWrapper(a)
+    /** Readies what outlives Activities, from the first thing to start the process. */
+    private fun prepare(c: Context) {
+        if (::app.isInitialized) return
+        run {
+            app = c.applicationContext
+            context = MutableContextWrapper(c)
             root = FrameLayout(context)
             ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
                 bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
@@ -86,10 +87,14 @@ object HostImpl : HostCalls {
             root.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob ->
                 if (r - l != or - ol || b - t != ob - ot) for (w in windows.values) w.reportSize()
             }
-        } else {
-            context.baseContext = a
-            (root.parent as? android.view.ViewGroup)?.removeView(root)
         }
+    }
+
+    fun attach(a: Activity) {
+        activity = a
+        prepare(a)
+        context.baseContext = a
+        (root.parent as? android.view.ViewGroup)?.removeView(root)
         root.setBackgroundColor(themeColor(android.R.attr.colorBackground))
         a.setContentView(root)
         ViewCompat.requestApplyInsets(root)
@@ -99,8 +104,16 @@ object HostImpl : HostCalls {
         if (activity === a) activity = null
     }
 
+    /** Starts Go with no window to show, for what runs in the background. */
+    fun startHeadless(c: Context) {
+        if (started) return
+        DevLibrary.find(c)
+        prepare(c)
+        startGo(c, null)
+    }
+
     /** Starts Go once per process, with the environment a launch passes (mygo dev). */
-    fun startGo(a: Activity, intent: Intent?) {
+    fun startGo(a: Context, intent: Intent?) {
         if (started) return
         started = true
         val files = a.filesDir.absolutePath
@@ -129,7 +142,9 @@ object HostImpl : HostCalls {
         val ctx = a.applicationContext
         Thread {
             val dir = Resources.extract(ctx)
-            root.post {
+            // Not by a view's post: with no Activity, the root is in no window
+            // and would hold it until one comes.
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
                 Os.setenv("MYGO_RESOURCES", dir, true)
                 MyGoNative.start()
             }
@@ -202,6 +217,7 @@ object HostImpl : HostCalls {
         r.systemVersion = Build.VERSION.RELEASE
         r.model = Build.MODEL
         r.restoring = restoring
+        r.background = activity == null // the system started it for a task
         return r
     }
 

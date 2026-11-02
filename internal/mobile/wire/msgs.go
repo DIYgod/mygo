@@ -180,6 +180,7 @@ type AppInfoReply struct {
 	SystemVersion string
 	Model         string
 	Restoring     bool
+	Background    bool
 }
 
 func (m *AppInfoReply) Decode(r *Reader) {
@@ -199,6 +200,7 @@ func (m *AppInfoReply) Decode(r *Reader) {
 	m.SystemVersion = r.String()
 	m.Model = r.String()
 	m.Restoring = r.Bool()
+	m.Background = r.Bool()
 }
 
 // TimeZone is the name of the system's time zone; any thread.

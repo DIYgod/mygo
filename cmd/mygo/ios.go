@@ -178,7 +178,7 @@ func (t *iosToolchain) buildApp(ctx context.Context, c, dc *Config, tk *task, op
 			info[k] = v
 		}
 	}
-	for k, v := range plugins.infoPlist() {
+	for k, v := range plugins.infoPlist(dc.Identifier) {
 		info[k] = v
 	}
 	for k, v := range dc.IOS.InfoPlist {

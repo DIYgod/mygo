@@ -46,7 +46,7 @@ func TestMobilePlugins(t *testing.T) {
 	if got := ps.frameworks(); len(got) != 2 {
 		t.Errorf("frameworks: %v", got)
 	}
-	if got := ps.infoPlist()["UIBackgroundModes"].([]any); len(got) != 2 {
+	if got := ps.infoPlist("dev.mygo.x")["UIBackgroundModes"].([]any); len(got) != 2 {
 		t.Errorf("background modes: %v", got)
 	}
 	kt := t.TempDir()

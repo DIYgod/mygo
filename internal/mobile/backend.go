@@ -145,6 +145,8 @@ func (b *Backend) Init(h platform.AppHandler, _ platform.AppOptions) error {
 	var t wire.ThemeReply
 	b.call(&wire.Theme{}, &t)
 	b.dark = t.Dark
+	// Started for a background task: no frames until the user opens it.
+	b.background = b.appInfo().Background
 	return nil
 }
 
