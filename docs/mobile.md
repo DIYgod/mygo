@@ -202,6 +202,18 @@ pay for it.
 `mobile.SetLook` chooses a design whatever the system. `examples/mobile` shows
 them all.
 
+Pictures from the network take `ui/netimage`, in place of `ui.Image`:
+
+```go
+netimage.Image(c, user.AvatarURL, netimage.Options{MaxSide: 240}).Size(80, 80).Radius(40)
+```
+
+A placeholder holds their place, and they fade in once they come. They stay in
+memory while there is room and on disk across runs, as their servers' caching
+headers say, and show offline. What's on screen downloads before what a fling
+left behind, which doesn't download at all if it's gone by its turn. Desktops
+and browsers take it too.
+
 ## The device
 
 | | |

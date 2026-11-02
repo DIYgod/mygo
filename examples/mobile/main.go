@@ -27,6 +27,7 @@ import (
 	"github.com/egoist/mygo/plugins/videoplayer"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
+	"github.com/egoist/mygo/ui/netimage"
 )
 
 type app struct {
@@ -156,6 +157,12 @@ func (a *app) lists(c *ui.Context) {
 	l.Children(func() {
 		ui.Column(c).Children(func() {
 			ui.Text(c, "Pull down to refresh. Swipe a row aside. Hold one for its menu.").TextColor(t.TextMuted).Padding(12, 16)
+			ui.ScrollHorizontal(c).FillWidth().Gap(8).PaddingX(16).Children(func() {
+				for i := range 24 {
+					url := fmt.Sprintf("https://picsum.photos/seed/mygo%d/240", i)
+					netimage.Image(c.Key(i), url, netimage.Options{MaxSide: 240}).Size(80, 80).Radius(8).Shrink(0)
+				}
+			})
 			for i, r := range a.rows {
 				i, r := i, r
 				mobile.SwipeRow(c.Key(r), nil, mobile.SwipeOptions{
