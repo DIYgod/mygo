@@ -21,6 +21,7 @@ import (
 	"github.com/egoist/mygo/plugins/camera"
 	"github.com/egoist/mygo/plugins/imagepicker"
 	"github.com/egoist/mygo/plugins/location"
+	"github.com/egoist/mygo/plugins/maps"
 	"github.com/egoist/mygo/plugins/permissionflow"
 	"github.com/egoist/mygo/plugins/preferences"
 	"github.com/egoist/mygo/plugins/sensors"
@@ -49,6 +50,8 @@ type app struct {
 
 	// Pages.
 	video    *videoplayer.Player
+	mapOn    bool
+	world    *maps.Map
 	videoNow videoplayer.State
 	web      *mygo.WebView
 	overPage int
@@ -452,6 +455,34 @@ func (a *app) system(c *ui.Context) {
 							}
 						})
 					}
+				}
+				mobile.ListRow(c.Key("mapOn"), mobile.RowOptions{Title: "Map", Trailing: func() { mobile.Switch(c.Key("mapSwitch"), &a.mapOn) }})
+				if a.mapOn {
+					if a.world == nil {
+						paris := maps.LatLng{Lat: 48.8584, Lng: 2.2945}
+						m, err := maps.New(a.win, maps.Options{Center: paris, Zoom: 13})
+						if err != nil {
+							a.results["map"] = err.Error()
+							a.mapOn = false
+						} else {
+							a.world = m
+							go m.AddMarker(context.Background(), maps.Marker{ID: "tower", At: paris, Title: "Eiffel Tower"})
+							m.OnTap(func(at maps.LatLng) {
+								a.results["map"] = fmt.Sprintf("tapped %.3f, %.3f", at.Lat, at.Lng)
+								a.win.Update(func() {})
+							})
+							m.OnMarkerTap(func(id string) {
+								a.results["map"] = "tapped the pin " + id
+								a.win.Update(func() {})
+							})
+						}
+					}
+					if a.world != nil {
+						ui.Box(c).Height(240).Shrink(0).FillWidth().Children(func() { ui.WebView(c, a.world).Fill() })
+					}
+				}
+				if s := a.results["map"]; s != "" {
+					ui.Text(c, s).FontSize(13).Padding(4, 16).TextColor(t.TextMuted)
 				}
 				if s := a.results["camera"]; s != "" {
 					ui.Text(c, s).FontSize(13).Padding(4, 16).TextColor(t.TextMuted)
