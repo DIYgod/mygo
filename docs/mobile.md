@@ -493,6 +493,11 @@ tests: text differs from one to another.
 on phones: `SIMCTL_CHILD_MYGO_FRAME_STATS=1` for a simulator, and on Android
 `adb shell am start ... --es mygo.env MYGO_FRAME_STATS=1`.
 
+End-to-end tests drive the running app from another process, on simulators and
+devices alike, with [the automation plugin](plugins/automation.md#on-phones): they
+read the elements on screen, act on them, send fingers and text, capture the
+screen and wait for it to settle.
+
 ## How apps behave on phones
 
 - **One screen**: the window shown last fills the screen, above those

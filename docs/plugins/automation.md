@@ -43,6 +43,28 @@ A socket left at the path by an app that ended without closing it is
 replaced; one that another app listens on is not, nor a file that is no
 socket. The app removes its socket when it quits.
 
+
+## On phones
+
+The same protocol drives an app in a simulator or on a device, so that a test
+written once runs on all of them. Release builds leave the plugin out, so the
+import needs no tag.
+
+The iOS simulator shares the Mac's files, and takes the variable through `simctl`:
+
+```sh
+SIMCTL_CHILD_MYGO_AUTOMATION=/tmp/app.sock xcrun simctl launch booted com.example.app
+```
+
+An app's files on Android are out of adb's reach: name a socket in the abstract
+namespace, with `@`, and forward a port to it. The debug build takes the
+environment with its launch:
+
+```sh
+adb shell "am start -n com.example.app/dev.mygo.MyGoActivity --es mygo.env 'MYGO_AUTOMATION=@app'"
+adb forward tcp:9000 localabstract:app
+```
+
 ## The protocol
 
 A client connects to the socket and writes requests, one JSON object per
