@@ -185,6 +185,26 @@ func (b *Backend) handle(msg []byte) []byte {
 			w.loading = false
 			w.h.LoadFailed(w.appURL(e.URL), e.Code, e.Description)
 		}
+	case wire.EventWindowFront:
+		var e wire.WindowFrontEvent
+		e.Decode(&r)
+		old := b.front()
+		var w *window
+		if e.ID != 0 {
+			w = win(e.ID)
+		} else {
+			// The app's first scene: the last shown there.
+			for _, s := range b.shown {
+				if !s.opts.OwnScene {
+					w = s
+				}
+			}
+		}
+		if w != nil && w.visible {
+			b.unshow(w)
+			b.shown = append(b.shown, w)
+			b.refocus(old)
+		}
 	case wire.EventClosedByPage:
 		var e wire.ClosedByPageEvent
 		e.Decode(&r)

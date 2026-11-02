@@ -121,35 +121,36 @@ const (
 	EventLoadFinished        = 29
 	EventLoadFailed          = 30
 	EventClosedByPage        = 31
-	EventProcessGone         = 32
-	EventPermissionRequested = 33
-	EventSchemeRequest       = 34
-	EventSchemeCancel        = 35
-	EventAsyncResult         = 36
-	EventCaptured            = 37
-	EventMessageBoxResult    = 38
-	EventFilesResult         = 39
-	EventNotifyDone          = 40
-	EventNotificationClicked = 41
-	EventFrame               = 42
-	EventSurfaceChanged      = 43
-	EventSurfaceDestroyed    = 44
-	EventTouch               = 45
-	EventScroll              = 46
-	EventKey                 = 47
-	EventTextReplace         = 48
-	EventTextMark            = 49
-	EventTextUnmark          = 50
-	EventTextDelete          = 51
-	EventTextSelect          = 52
-	EventTextCommand         = 53
-	EventTextState           = 54
-	EventTextRange           = 55
-	EventTextBounds          = 56
-	EventTextIndexAt         = 57
-	EventTextInputEnded      = 58
-	EventAccessibilityTree   = 59
-	EventAccessibilityAction = 60
+	EventWindowFront         = 32
+	EventProcessGone         = 33
+	EventPermissionRequested = 34
+	EventSchemeRequest       = 35
+	EventSchemeCancel        = 36
+	EventAsyncResult         = 37
+	EventCaptured            = 38
+	EventMessageBoxResult    = 39
+	EventFilesResult         = 40
+	EventNotifyDone          = 41
+	EventNotificationClicked = 42
+	EventFrame               = 43
+	EventSurfaceChanged      = 44
+	EventSurfaceDestroyed    = 45
+	EventTouch               = 46
+	EventScroll              = 47
+	EventKey                 = 48
+	EventTextReplace         = 49
+	EventTextMark            = 50
+	EventTextUnmark          = 51
+	EventTextDelete          = 52
+	EventTextSelect          = 53
+	EventTextCommand         = 54
+	EventTextState           = 55
+	EventTextRange           = 56
+	EventTextBounds          = 57
+	EventTextIndexAt         = 58
+	EventTextInputEnded      = 59
+	EventAccessibilityTree   = 60
+	EventAccessibilityAction = 61
 )
 
 // AppInfo is the app's bundle and the system's settings, asked once at start.
@@ -306,6 +307,7 @@ func (*Log) Wait() bool { return false }
 type CreateWindow struct {
 	ID              int
 	Surface         bool
+	OwnScene        bool
 	Background      int
 	HasBackground   bool
 	Schemes         []string
@@ -326,6 +328,7 @@ func (m *CreateWindow) Encode(w *Writer) {
 	w.Uvarint(CallCreateWindow)
 	w.Int(m.ID)
 	w.Bool(m.Surface)
+	w.Bool(m.OwnScene)
 	w.Int(m.Background)
 	w.Bool(m.HasBackground)
 	w.Strings(m.Schemes)
@@ -2049,6 +2052,15 @@ type ClosedByPageEvent struct {
 }
 
 func (m *ClosedByPageEvent) Decode(r *Reader) {
+	m.ID = r.Int()
+}
+
+// WindowFrontEvent is the user went to a window of its own scene, or (0) to the app's first.
+type WindowFrontEvent struct {
+	ID int
+}
+
+func (m *WindowFrontEvent) Decode(r *Reader) {
 	m.ID = r.Int()
 }
 

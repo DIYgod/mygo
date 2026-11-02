@@ -41,7 +41,7 @@ var calls = []msg{
 
 	{name: "CreateWindow", doc: "the screen's content: a web view, or a surface for native UI", wait: true,
 		args: []field{
-			f("ID", "int"), f("Surface", "bool"), f("Background", "int"), f("HasBackground", "bool"),
+			f("ID", "int"), f("Surface", "bool"), f("OwnScene", "bool"), f("Background", "int"), f("HasBackground", "bool"),
 			f("Schemes", "strings"), f("Scripts", "strings"), f("ScriptFlags", "strings"),
 			f("UserAgent", "string"), f("UserAgentSuffix", "string"), f("Inspectable", "bool"),
 			f("Autoplay", "bool"), f("SwipeNavigation", "bool"), f("PinchZoom", "bool"),
@@ -213,6 +213,7 @@ var events = []msg{
 	{name: "LoadFinished", args: []field{f("ID", "int")}},
 	{name: "LoadFailed", args: []field{f("ID", "int"), f("URL", "string"), f("Code", "int"), f("Description", "string")}},
 	{name: "ClosedByPage", args: []field{f("ID", "int")}},
+	{name: "WindowFront", doc: "the user went to a window of its own scene, or (0) to the app's first", args: []field{f("ID", "int")}},
 	{name: "ProcessGone", args: []field{f("ID", "int"), f("Reason", "string")}},
 	{name: "PermissionRequested", wait: true, args: []field{f("ID", "int"), f("Kinds", "strings"), f("Origin", "string")}, reply: []field{f("Allow", "bool")}},
 	{name: "SchemeRequest", doc: "a request of one of the app's schemes (Header: names and values in turn)",

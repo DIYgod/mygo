@@ -18,7 +18,11 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
 
     /// The view controller to present over: the root, or what it presents.
     var presenter: UIViewController {
-        var vc: UIViewController = root
+        // Over the window the user is in, which an iPad may have several of.
+        let active = UIApplication.shared.connectedScenes.lazy
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+        var vc: UIViewController = active?.keyWindow?.rootViewController ?? root
         while let p = vc.presentedViewController { vc = p }
         return vc
     }
@@ -102,7 +106,7 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
         let w: HostWindow
         if c.surface {
             let s = SurfaceWindow(id: c.id)
-            r.layer = Int(bitPattern: Unmanaged.passUnretained(s.layer).toOpaque())
+            r.layer = Int(bitPattern: Unmanaged.passUnretained(s.drawHost).toOpaque())
             w = s
         } else if !c.viewType.isEmpty {
             guard let v = PluginHost.makeView(c.viewType, id: c.id, args: c.viewArgs) else {
@@ -114,6 +118,7 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
             w = WebWindow(id: c.id, c)
         }
         if c.hasBackground { w.setBackground(UIColor(rgba: c.background)) }
+        w.ownScene = c.ownScene && Scenes.available
         windows[c.id] = w
         if c.parent != 0 { surface(c.parent)?.hold(w) }
         return r
@@ -123,12 +128,20 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
 
     func showWindow(_ c: ShowWindowCall) {
         guard let w = windows[c.id] else { return }
+        if w.ownScene {
+            Scenes.open(w)
+            return
+        }
         Navigation.shared.show(w)
         w.reportSize()
     }
 
     func hideWindow(_ c: HideWindowCall) {
         guard let w = windows[c.id] else { return }
+        if w.ownScene {
+            Scenes.close(w.id)
+            return
+        }
         Navigation.shared.hide(w)
     }
 
@@ -139,6 +152,7 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
             w.close()
             return
         }
+        if w.ownScene { Scenes.close(w.id) }
         Navigation.shared.hide(w)
         Navigation.shared.forget(w)
         w.close()

@@ -185,6 +185,7 @@ class LogCall(
 class CreateWindowCall(
     @JvmField var id: Long = 0L,
     @JvmField var surface: Boolean = false,
+    @JvmField var ownScene: Boolean = false,
     @JvmField var background: Long = 0L,
     @JvmField var hasBackground: Boolean = false,
     @JvmField var schemes: List<String> = emptyList(),
@@ -203,6 +204,7 @@ class CreateWindowCall(
     constructor(r: WireReader) : this() {
         id = r.int()
         surface = r.bool()
+        ownScene = r.bool()
         background = r.int()
         hasBackground = r.bool()
         schemes = r.strings()
@@ -1638,16 +1640,23 @@ object Event {
         w.int(id)
         return w.toByteArray()
     }
-    @JvmStatic fun processGone(id: Long, reason: String): ByteArray {
+    /** the user went to a window of its own scene, or (0) to the app's first */
+    @JvmStatic fun windowFront(id: Long): ByteArray {
         val w = WireWriter()
         w.uvarint(32)
+        w.int(id)
+        return w.toByteArray()
+    }
+    @JvmStatic fun processGone(id: Long, reason: String): ByteArray {
+        val w = WireWriter()
+        w.uvarint(33)
         w.int(id)
         w.string(reason)
         return w.toByteArray()
     }
     @JvmStatic fun permissionRequested(id: Long, kinds: List<String>, origin: String): ByteArray {
         val w = WireWriter()
-        w.uvarint(33)
+        w.uvarint(34)
         w.int(id)
         w.strings(kinds)
         w.string(origin)
@@ -1656,7 +1665,7 @@ object Event {
     /** a request of one of the app's schemes (Header: names and values in turn) */
     @JvmStatic fun schemeRequest(id: Long, req: Long, method: String, url: String, header: List<String>, body: ByteArray, hasBody: Boolean): ByteArray {
         val w = WireWriter()
-        w.uvarint(34)
+        w.uvarint(35)
         w.int(id)
         w.int(req)
         w.string(method)
@@ -1668,13 +1677,13 @@ object Event {
     }
     @JvmStatic fun schemeCancel(req: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(35)
+        w.uvarint(36)
         w.int(req)
         return w.toByteArray()
     }
     @JvmStatic fun asyncResult(req: Long, result: String, error: String): ByteArray {
         val w = WireWriter()
-        w.uvarint(36)
+        w.uvarint(37)
         w.int(req)
         w.string(result)
         w.string(error)
@@ -1682,7 +1691,7 @@ object Event {
     }
     @JvmStatic fun captured(req: Long, png: ByteArray, error: String): ByteArray {
         val w = WireWriter()
-        w.uvarint(37)
+        w.uvarint(38)
         w.int(req)
         w.bytes(png)
         w.string(error)
@@ -1690,14 +1699,14 @@ object Event {
     }
     @JvmStatic fun messageBoxResult(req: Long, response: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(38)
+        w.uvarint(39)
         w.int(req)
         w.int(response)
         return w.toByteArray()
     }
     @JvmStatic fun filesResult(req: Long, paths: List<String>, error: String): ByteArray {
         val w = WireWriter()
-        w.uvarint(39)
+        w.uvarint(40)
         w.int(req)
         w.strings(paths)
         w.string(error)
@@ -1705,28 +1714,28 @@ object Event {
     }
     @JvmStatic fun notifyDone(req: Long, error: String): ByteArray {
         val w = WireWriter()
-        w.uvarint(40)
+        w.uvarint(41)
         w.int(req)
         w.string(error)
         return w.toByteArray()
     }
     @JvmStatic fun notificationClicked(notificationID: String): ByteArray {
         val w = WireWriter()
-        w.uvarint(41)
+        w.uvarint(42)
         w.string(notificationID)
         return w.toByteArray()
     }
     /** the display refreshes: draw a frame if one was asked for */
     @JvmStatic fun frame(id: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(42)
+        w.uvarint(43)
         w.int(id)
         return w.toByteArray()
     }
     /** the native surface to draw on (a CAMetalLayer, an ANativeWindow), 0 when gone */
     @JvmStatic fun surfaceChanged(id: Long, handle: Long, width: Double, height: Double, scale: Double, refresh: Double): ByteArray {
         val w = WireWriter()
-        w.uvarint(43)
+        w.uvarint(44)
         w.int(id)
         w.int(handle)
         w.float(width)
@@ -1738,14 +1747,14 @@ object Event {
     /** the native surface goes: the host waits for Go to let go of it */
     @JvmStatic fun surfaceDestroyed(id: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(44)
+        w.uvarint(45)
         w.int(id)
         return w.toByteArray()
     }
     /** a finger, a pen or a mouse: Phase is "down", "move", "up" or "cancel", Kind "touch", "pen" or "mouse" */
     @JvmStatic fun touch(id: Long, pointer: Long, phase: String, kind: String, x: Double, y: Double, pressure: Double, buttons: Long, time: Double): ByteArray {
         val w = WireWriter()
-        w.uvarint(45)
+        w.uvarint(46)
         w.int(id)
         w.int(pointer)
         w.string(phase)
@@ -1760,7 +1769,7 @@ object Event {
     /** a mouse's or a trackpad's scrolling, in DIPs */
     @JvmStatic fun scroll(id: Long, x: Double, y: Double, dx: Double, dy: Double, precise: Boolean, phase: String): ByteArray {
         val w = WireWriter()
-        w.uvarint(46)
+        w.uvarint(47)
         w.int(id)
         w.float(x)
         w.float(y)
@@ -1773,7 +1782,7 @@ object Event {
     /** a hardware keyboard's key: Down, its name (as ui names keys) and the text it types */
     @JvmStatic fun key(id: Long, down: Boolean, key: String, text: String, mods: Long, repeated: Boolean): ByteArray {
         val w = WireWriter()
-        w.uvarint(47)
+        w.uvarint(48)
         w.int(id)
         w.bool(down)
         w.string(key)
@@ -1785,7 +1794,7 @@ object Event {
     /** the keyboard put Text in Start to End of the document, or with no range in place of the marked text or the selection; answers TextStateReply */
     @JvmStatic fun textReplace(id: Long, hasRange: Boolean, start: Long, end: Long, text: String): ByteArray {
         val w = WireWriter()
-        w.uvarint(48)
+        w.uvarint(49)
         w.int(id)
         w.bool(hasRange)
         w.int(start)
@@ -1796,7 +1805,7 @@ object Event {
     /** the input method composes Text over Start to End, or with no range over the marked text or the selection; SelStart and SelEnd are in Text; answers TextStateReply */
     @JvmStatic fun textMark(id: Long, hasRange: Boolean, start: Long, end: Long, text: String, selStart: Long, selEnd: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(49)
+        w.uvarint(50)
         w.int(id)
         w.bool(hasRange)
         w.int(start)
@@ -1809,14 +1818,14 @@ object Event {
     /** the marked text stays as text; answers TextStateReply */
     @JvmStatic fun textUnmark(id: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(50)
+        w.uvarint(51)
         w.int(id)
         return w.toByteArray()
     }
     /** the keyboard deleted Before units before the selection and After after it; answers TextStateReply */
     @JvmStatic fun textDelete(id: Long, before: Long, after: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(51)
+        w.uvarint(52)
         w.int(id)
         w.int(before)
         w.int(after)
@@ -1825,7 +1834,7 @@ object Event {
     /** the keyboard moved the selection; answers TextStateReply */
     @JvmStatic fun textSelect(id: Long, start: Long, end: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(52)
+        w.uvarint(53)
         w.int(id)
         w.int(start)
         w.int(end)
@@ -1834,7 +1843,7 @@ object Event {
     /** an editing action of the keyboard or the edit menu: "newline", "tab", "deleteBackward", "deleteForward", "cut", "copy", "paste", "selectAll", "left", …; answers TextStateReply */
     @JvmStatic fun textCommand(id: Long, command: String): ByteArray {
         val w = WireWriter()
-        w.uvarint(53)
+        w.uvarint(54)
         w.int(id)
         w.string(command)
         return w.toByteArray()
@@ -1842,14 +1851,14 @@ object Event {
     /** the text around the selection, and the selection */
     @JvmStatic fun textState(id: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(54)
+        w.uvarint(55)
         w.int(id)
         return w.toByteArray()
     }
     /** a part of the document outside the text the host has */
     @JvmStatic fun textRange(id: Long, start: Long, end: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(55)
+        w.uvarint(56)
         w.int(id)
         w.int(start)
         w.int(end)
@@ -1858,7 +1867,7 @@ object Event {
     /** where the range is on screen: its first line's rectangle */
     @JvmStatic fun textBounds(id: Long, start: Long, end: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(56)
+        w.uvarint(57)
         w.int(id)
         w.int(start)
         w.int(end)
@@ -1867,7 +1876,7 @@ object Event {
     /** the offset nearest a point of the window */
     @JvmStatic fun textIndexAt(id: Long, x: Double, y: Double): ByteArray {
         val w = WireWriter()
-        w.uvarint(57)
+        w.uvarint(58)
         w.int(id)
         w.float(x)
         w.float(y)
@@ -1876,21 +1885,21 @@ object Event {
     /** the keyboard went away */
     @JvmStatic fun textInputEnded(id: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(58)
+        w.uvarint(59)
         w.int(id)
         return w.toByteArray()
     }
     /** the accessible elements, encoded as Nodes: for each, its ID, parent, role, label, value, hint, frame and actions */
     @JvmStatic fun accessibilityTree(id: Long): ByteArray {
         val w = WireWriter()
-        w.uvarint(59)
+        w.uvarint(60)
         w.int(id)
         return w.toByteArray()
     }
     /** an assistive technology's action on an element: "press", "increment", "decrement", "focus", "scrollForward", … */
     @JvmStatic fun accessibilityAction(id: Long, node: Long, action: String): ByteArray {
         val w = WireWriter()
-        w.uvarint(60)
+        w.uvarint(61)
         w.int(id)
         w.int(node)
         w.string(action)

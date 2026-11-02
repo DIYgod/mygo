@@ -35,8 +35,22 @@ final class SurfaceWindow: HostWindow, UITextInput, UIPointerInteractionDelegate
 
     private var elements: [AccessElement]?
 
+    /// What Go's renderer adds its layer to, from its thread. The view's own
+    /// layer is UIKit's, which allows changes on the main thread alone.
+    let drawHost = CALayer()
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        drawHost.frame = bounds
+        CATransaction.commit()
+    }
+
     override init(id: Int) {
         super.init(id: id)
+        layer.addSublayer(drawHost)
+        drawHost.frame = bounds
         isMultipleTouchEnabled = true
         backgroundColor = .systemBackground
         let l = CADisplayLink(target: self, selector: #selector(tick))
@@ -104,7 +118,7 @@ final class SurfaceWindow: HostWindow, UITextInput, UIPointerInteractionDelegate
         super.didMoveToWindow()
         guard let w = window else { return }
         let hz = Double(w.screen.maximumFramesPerSecond)
-        Go.send(Event.surfaceChanged(id: id, handle: Int(bitPattern: Unmanaged.passUnretained(layer).toOpaque()),
+        Go.send(Event.surfaceChanged(id: id, handle: Int(bitPattern: Unmanaged.passUnretained(drawHost).toOpaque()),
                                      width: Double(bounds.width), height: Double(bounds.height),
                                      scale: Double(w.screen.scale), refresh: hz))
     }

@@ -230,6 +230,9 @@ type IOS struct {
 	// Distribution is what the build is for: "app-store" (default, and
 	// TestFlight), "ad-hoc", "development" or "enterprise".
 	Distribution string `json:"distribution"`
+	// MultipleWindows lets WindowOptions.OwnScene open windows of the system's
+	// own on iPad, beside each other (default: the app has one).
+	MultipleWindows bool `json:"multipleWindows"`
 	// BuildNumber is CFBundleVersion, which must grow with every upload of
 	// a version (default: the version).
 	BuildNumber string `json:"buildNumber"`

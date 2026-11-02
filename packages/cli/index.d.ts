@@ -288,6 +288,8 @@ export interface IOSConfig {
   /** What the build is for (default: `app-store`, TestFlight too). */
   distribution?: "app-store" | "ad-hoc" | "development" | "enterprise";
   /** `CFBundleVersion`, which must grow with every upload of a version (default: the version). */
+  /** Lets WindowOptions.OwnScene open windows of the system's own on iPad. */
+  multipleWindows?: boolean;
   buildNumber?: string;
   /** The orientations the app turns to on iPhones (default: both); iPads take every one. */
   orientations?: ("portrait" | "landscape")[];

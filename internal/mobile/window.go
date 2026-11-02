@@ -105,7 +105,7 @@ func (b *Backend) makeWindow(opts *platform.WindowOptions, h platform.WindowHand
 	}
 	src, flags := scriptsOf(opts.UserScripts)
 	c := wire.CreateWindow{
-		ID: w.id, Surface: opts.Surface, Schemes: opts.Schemes, Scripts: src, ScriptFlags: flags,
+		ID: w.id, Surface: opts.Surface, OwnScene: opts.OwnScene, Schemes: opts.Schemes, Scripts: src, ScriptFlags: flags,
 		UserAgent: opts.UserAgent, UserAgentSuffix: opts.UserAgentSuffix, Inspectable: opts.DevTools,
 		Autoplay: opts.Autoplay, SwipeNavigation: opts.SwipeNavigation, PinchZoom: opts.PinchZoom,
 		ViewType: viewType, ViewArgs: viewArgs,

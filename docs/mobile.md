@@ -263,6 +263,16 @@ Android the bars take the color of the window's background. On desktops
 the windows are windows: `Tabs.Select` shows one, and a pushed window
 shows as one. `examples/tabs` shows both, with a page in one of its tabs.
 
+On iPad a window can be a window of the system's own, beside the app's others, with
+`"ios": {"multipleWindows": true}` in `mygo.json`:
+
+```go
+mygo.NewWindow(mygo.WindowOptions{Title: "Draft", OwnScene: true, Content: ui.View(draft)}).Show()
+```
+
+Elsewhere it's a window as any: on a phone, over the one before. Android's tablets
+split the screen with other apps by themselves.
+
 ## Fingers
 
 Native UI takes fingers as the systems' own toolkits do:

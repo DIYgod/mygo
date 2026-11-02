@@ -435,6 +435,8 @@ type WindowOptions struct {
 	// itself fills, instead of a webview: Window.Surface returns it, the
 	// webview methods do nothing and the webview options are ignored.
 	Surface bool
+	// OwnScene opens the window as a window of the system's own, on iPad.
+	OwnScene bool
 }
 
 // DataStoreOptions describe a website data store (AppController.NewDataStore).

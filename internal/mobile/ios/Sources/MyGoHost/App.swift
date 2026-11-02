@@ -101,11 +101,78 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     func applicationWillTerminate(_ application: UIApplication) { Go.ask(Event.terminating()) }
 }
 
+/// The windows of their own scenes, on iPad (WindowOptions.OwnScene): a scene
+/// asked for with the window's number, in which it's the whole content.
+enum Scenes {
+    static let activity = "dev.mygo.window"
+    static var sessions: [Int: UISceneSession] = [:]
+
+    static var available: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad && UIApplication.shared.supportsMultipleScenes
+    }
+
+    static func open(_ w: HostWindow) {
+        let request: UISceneSessionActivationRequest
+        if let s = sessions[w.id] {
+            request = UISceneSessionActivationRequest(session: s)
+        } else {
+            let a = NSUserActivity(activityType: activity)
+            a.userInfo = ["window": w.id]
+            request = UISceneSessionActivationRequest(role: .windowApplication, userActivity: a)
+        }
+        UIApplication.shared.activateSceneSession(for: request) { error in
+            FileHandle.standardError.write(Data("mygo: opening a window: \(error)\n".utf8))
+        }
+    }
+
+    static func close(_ id: Int) {
+        guard let s = sessions.removeValue(forKey: id) else { return }
+        // Back to the app's first, rather than out of the app, where iPadOS would
+        // go from the only window on screen.
+        if let main = Host.shared.window?.windowScene?.session {
+            UIApplication.shared.activateSceneSession(for: UISceneSessionActivationRequest(session: main)) { _ in }
+        }
+        UIApplication.shared.requestSceneSessionDestruction(s, options: nil)
+    }
+}
+
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
+    /// The MyGo window this scene is, for one of its own; 0 for the app's first.
+    private var ownWindow = 0
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
         guard let scene = scene as? UIWindowScene else { return }
+        if let a = options.userActivities.first(where: { $0.activityType == Scenes.activity }) {
+            // A window of its own, unless it's of an earlier run, which the
+            // system brings back.
+            guard let id = a.userInfo?["window"] as? Int, let hw = Host.shared.windows[id] else {
+                UIApplication.shared.requestSceneSessionDestruction(session, options: nil)
+                return
+            }
+            let w = UIWindow(windowScene: scene)
+            let holder = UIViewController()
+            let c = Navigation.shared.controller(hw)
+            holder.addChild(c)
+            c.view.frame = holder.view.bounds
+            c.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            holder.view.addSubview(c.view)
+            c.didMove(toParent: holder)
+            w.rootViewController = holder
+            w.makeKeyAndVisible()
+            window = w
+            ownWindow = id
+            Scenes.sessions[id] = session
+            scene.title = Navigation.shared.controller(hw).title
+            hw.reportSize()
+            return
+        }
+        if Host.shared.window != nil {
+            // A second of the app's first, which the user asked the system for:
+            // the app has one such window.
+            UIApplication.shared.requestSceneSessionDestruction(session, options: nil)
+            return
+        }
         let w = UIWindow(windowScene: scene)
         w.rootViewController = Host.shared.root
         w.makeKeyAndVisible()
@@ -123,11 +190,36 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         if let url = activity.webpageURL { Go.send(Event.openURLs(urls: [url.absoluteString])) }
     }
 
-    func sceneDidBecomeActive(_ scene: UIScene) { Go.send(Event.active(active: true)) }
+    func sceneDidDisconnect(_ scene: UIScene) {
+        window?.rootViewController = nil
+        window = nil
+        if ownWindow != 0 {
+            // The user closed it, unless the app did.
+            if Scenes.sessions.removeValue(forKey: ownWindow) != nil, Host.shared.windows[ownWindow] != nil {
+                Go.send(Event.closedByPage(id: ownWindow))
+            }
+        } else if Host.shared.window?.windowScene === scene {
+            Host.shared.window = nil
+        }
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        Go.send(Event.active(active: true))
+        if UIApplication.shared.supportsMultipleScenes { Go.send(Event.windowFront(id: ownWindow)) }
+    }
+
     func sceneWillResignActive(_ scene: UIScene) { Go.send(Event.active(active: false)) }
+
     // Waits for Go: it must stop drawing before the app is in the background,
-    // where iOS ends apps that use the GPU.
-    func sceneDidEnterBackground(_ scene: UIScene) { Go.ask(Event.background(background: true)) }
+    // where iOS ends apps that use the GPU. The app is there once all its
+    // scenes are.
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        let others = UIApplication.shared.connectedScenes.filter { $0 !== scene }
+        if others.allSatisfy({ $0.activationState == .background }) {
+            Go.ask(Event.background(background: true))
+        }
+    }
+
     func sceneWillEnterForeground(_ scene: UIScene) { Go.ask(Event.background(background: false)) }
 }
 
@@ -220,6 +312,8 @@ class HostWindow: UIView {
     let id: Int
     /// The surface showing this window under it, as a web view in native UI.
     weak var holder: SurfaceWindow?
+    /// It opens in a scene of its own, on iPad.
+    var ownScene = false
     private var lastSize: [Double] = []
 
     init(id: Int) {

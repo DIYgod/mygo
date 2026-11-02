@@ -4,5 +4,8 @@
   "identifier": "dev.mygo.mobile",
   "urlSchemes": [
     "mygomobile"
-  ]
+  ],
+  "ios": {
+    "multipleWindows": true
+  }
 }

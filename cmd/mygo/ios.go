@@ -192,6 +192,9 @@ func (t *iosToolchain) buildApp(ctx context.Context, c, dc *Config, tk *task, op
 		info[k] = v
 	}
 	addBackgroundModes(info, dc.IOS.BackgroundModes)
+	if dc.IOS.MultipleWindows {
+		info["NSUserActivityTypes"] = []any{"dev.mygo.window"} // Scenes, in the host
+	}
 	for k, v := range dc.IOS.InfoPlist {
 		info[k] = v // the app's own keys win
 	}
@@ -240,7 +243,7 @@ func (t *iosToolchain) infoPlist(c *Config, exe string) (map[string]any, error) 
 		"UILaunchScreen":                           map[string]any{},
 		"CADisableMinimumFrameDurationOnPhone":     true, // 120 Hz on ProMotion iPhones
 		"UIApplicationSupportsIndirectInputEvents": true,
-		"UIApplicationSceneManifest":               map[string]any{"UIApplicationSupportsMultipleScenes": false},
+		"UIApplicationSceneManifest":               map[string]any{"UIApplicationSupportsMultipleScenes": c.IOS.MultipleWindows},
 		"UISupportedInterfaceOrientations":         orient,
 		"UISupportedInterfaceOrientations~ipad": []any{"UIInterfaceOrientationPortrait", "UIInterfaceOrientationPortraitUpsideDown",
 			"UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"},
