@@ -72,10 +72,10 @@ type inspector struct {
 	// panel is the ID of the panel, width its width, and appW the width
 	// it leaves the content. tab is the panel's tab, side the tab of the
 	// sidebar below the tree, split the height of the tree.
-	panel       uint64
+	panel             uint64
 	width, appW, appH float32
-	tab, side   int
-	split       float32
+	tab, side         int
+	split             float32
 	// nodes are the elements of the last frame, in the order of the tree,
 	// with the keys the frame gave them; sel describes the element chosen.
 	// sum hashes them, and shown is the sum the panel was built from.
