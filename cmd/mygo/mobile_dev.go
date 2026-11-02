@@ -150,8 +150,8 @@ func (s *devSession) buildAndLaunchMobile(ctx context.Context, t *task, running 
 		t.set("signing")
 		if prof != nil {
 			err = prof.sign(work, app, dc)
-		} else if err = signFrameworks(app, "-"); err == nil {
-			err = runQuiet("codesign", "--force", "--sign", "-", app)
+		} else {
+			err = signForSimulator(app)
 		}
 		if err != nil {
 			return nil, sum, err

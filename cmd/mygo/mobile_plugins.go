@@ -52,6 +52,10 @@ type pluginIOS struct {
 	Class      string         `json:"class"`
 	Frameworks []string       `json:"frameworks"`
 	InfoPlist  map[string]any `json:"infoPlist"`
+	// Entitlements are what its code needs the app signed with: a simulator's
+	// build has them as they are, and a device's from the provisioning profile,
+	// which must have the capability.
+	Entitlements map[string]any `json:"entitlements"`
 }
 
 type pluginAndroid struct {
@@ -222,6 +226,19 @@ func writeIfChanged(path string, data []byte) error {
 		return nil
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// entitlements are what the plugins need the app signed with.
+func (ps mobilePlugins) entitlements() map[string]any {
+	out := map[string]any{}
+	for _, p := range ps {
+		if p.IOS != nil {
+			for k, v := range p.IOS.Entitlements {
+				out[k] = v
+			}
+		}
+	}
+	return out
 }
 
 func (ps mobilePlugins) frameworks() []string {

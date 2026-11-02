@@ -143,6 +143,13 @@ func (t *iosToolchain) buildApp(ctx context.Context, c, dc *Config, tk *task, op
 	tk.set("linking")
 	link := []string{"--sdk", t.sdkName, "swiftc", "-target", t.target, "-sdk", t.sdk, hostObject, lib, "-o", filepath.Join(bundle, exe), "-Xlinker", "-dead_strip", "-lresolv"}
 	link = append(link, frameworks...)
+	if t.simulator {
+		flags, err := plugins.simulatorEntitlements(work)
+		if err != nil {
+			return "", err
+		}
+		link = append(link, flags...)
+	}
 	if out, err := exec.CommandContext(ctx, "xcrun", link...).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("swiftc failed: %v\n%s", err, bytes.TrimSpace(out))
 	}
@@ -602,9 +609,7 @@ func buildIOS(c *Config, opts buildOptions, simulator bool) ([]string, error) {
 	if err == nil {
 		tk.set("signing")
 		if simulator {
-			if err = signFrameworks(bundle, "-"); err == nil {
-				err = runQuiet("codesign", "--force", "--sign", "-", bundle)
-			}
+			err = signForSimulator(bundle)
 		} else {
 			err = prof.sign(opts.work, bundle, c)
 		}
@@ -900,6 +905,14 @@ func (p *profile) signingEntitlements(c *Config) (map[string]any, error) {
 		prefix = p.team // older app IDs have a prefix of their own
 	}
 	ent["application-identifier"] = prefix + "." + c.Identifier
+	// A plugin's need shows now, not as the app first asks for it on a phone.
+	if plugins, err := c.mobilePlugins("ios"); err == nil {
+		for k := range plugins.entitlements() {
+			if _, ok := p.entitlements[k]; !ok {
+				return nil, fmt.Errorf("a plugin of the app needs the entitlement %s, which %q has not: turn on its capability for %s at developer.apple.com, then make the profile again", k, p.name, c.Identifier)
+			}
+		}
+	}
 	delete(ent, associatedDomainsKey)
 	if domains := c.IOS.associatedDomains(); len(domains) > 0 {
 		if !p.allowsAssociatedDomains() {

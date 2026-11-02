@@ -10,6 +10,21 @@ import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONObject
 
 class PushPlugin : MyGoPlugin {
+    private var listening = false
+
+    init {
+        PluginHost.onIntent = { if (listening) opened(it) }
+    }
+
+    private fun opened(i: android.content.Intent) {
+        val extras = i.extras ?: return
+        if (!extras.containsKey("google.message_id")) return
+        val o = JSONObject()
+        for (k in extras.keySet()) extras.getString(k)?.let { o.put(k, it) }
+        i.removeExtra("google.message_id") // once, as an Activity made again has it still
+        PluginHost.emit("push", "opened", o)
+    }
+
     override fun call(method: String, args: JSONObject, reply: PluginReply) {
         when (method) {
             "configure" -> {
@@ -39,6 +54,12 @@ class PushPlugin : MyGoPlugin {
                         else reply.failure(PluginFailure("Failed", t.exception?.toString() ?: ""))
                     }
                 }
+            }
+            "listenOpened" -> {
+                // What Firebase opens the app with, as the user tapped a notification.
+                listening = true
+                PluginHost.activity?.intent?.let { opened(it) }
+                reply.success(null)
             }
             else -> reply.failure(PluginFailure("NoMethod", method))
         }

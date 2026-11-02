@@ -49,6 +49,9 @@ object PluginHost {
         return viewMakers[type]?.invoke(context, id, a)
     }
 
+    /** Hears the Intents that open the app, for what a plugin's own open it with. */
+    var onIntent: ((Intent) -> Unit)? = null
+
     /** The app's context, which outlives Activities. */
     val context: Context get() = HostImpl.app
 

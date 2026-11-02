@@ -4,6 +4,7 @@ package ui
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 )
 
@@ -73,6 +74,47 @@ func TestDevStateRoundTrip(t *testing.T) {
 	}
 	if r2.Path() != "/a/b" || !r2.CanGoBack() {
 		t.Errorf("router: at %s", r2.Path())
+	}
+}
+
+// A route the change of the code removed leaves no blank page: the router starts
+// where it would have.
+func TestDevStateRouteGone(t *testing.T) {
+	defer func(a func(*Router, *node), b func(*Router, *node)) { noteRouter, routerBuilt = a, b }(noteRouter, routerBuilt)
+	noteRouter, routerBuilt = noteDevRouter, devRouterBuilt
+	show := false
+	r := NewRouter("/home")
+	tt := coreNewTester(func(c *context) {
+		if !show {
+			return
+		}
+		r.coreView(c, func(rt *Route) {
+			if rt.Match("/home") {
+				coreText(c, "home")
+			}
+		})
+	}, 200, 200)
+	tt.rt.dev = &devState{routers: map[uint64]*Router{}}
+	show = true
+	// Every router's element has one ID in this view: the kept state names it once built.
+	tt.Frame()
+	var id uint64
+	for k := range tt.rt.dev.routers {
+		id = k
+	}
+	tt.rt.dev.routers = map[uint64]*Router{}
+	tt.rt.dev.kept = &keptWindow{Routers: map[string]*keptRouter{
+		strconv.FormatUint(id, 10): {Locs: []string{"/removed"}},
+	}}
+	r2 := NewRouter("/home")
+	r = r2
+	tt.Frame()
+	tt.Frame()
+	if r2.Path() != "/home" {
+		t.Errorf("at %s", r2.Path())
+	}
+	if !tt.HasText("home") {
+		t.Errorf("shows %q", tt.Texts())
 	}
 }
 

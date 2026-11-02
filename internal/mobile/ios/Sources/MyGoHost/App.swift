@@ -258,7 +258,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 /// The view controller of the app's window, whose view holds the app's
 /// windows, the one in front last.
 final class RootViewController: UIViewController, UIScrollViewDelegate {
-    var keyboard: CGFloat = 0
+    /// Where the keyboard is, on the screen, nil while it's away.
+    var keyboardFrame: CGRect?
     /// UIKit tells a scroll view of a tap on the status bar, the only way it
     /// tells: this one shows nothing, and tells Go.
     private let statusBarTap = UIScrollView()
@@ -313,14 +314,12 @@ final class RootViewController: UIViewController, UIScrollViewDelegate {
     }
 
     @objc func keyboardChanged(_ n: Notification) {
-        var height: CGFloat = 0
-        if n.name != UIResponder.keyboardWillHideNotification,
-           let frame = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue {
-            let local = view.convert(frame, from: nil)
-            height = max(0, view.bounds.maxY - local.minY)
+        var frame: CGRect?
+        if n.name != UIResponder.keyboardWillHideNotification {
+            frame = (n.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
         }
-        if height != keyboard {
-            keyboard = height
+        if frame != keyboardFrame {
+            keyboardFrame = frame
             for w in Host.shared.windows.values { w.reportSize() }
         }
     }
@@ -356,12 +355,21 @@ class HostWindow: UIView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// How much of this window the keyboard covers: only that of the scene the
+    /// user is typing in, of those an iPad may show side by side.
+    private var keyboardCover: CGFloat {
+        guard let frame = Host.shared.root.keyboardFrame, let w = window,
+              w.windowScene?.activationState == .foregroundActive else { return 0 }
+        let local = convert(frame, from: w.screen.coordinateSpace)
+        return max(0, bounds.maxY - local.minY)
+    }
+
     /// Tells Go the window's size and what covers it, when they changed.
     func reportSize() {
         let s = holder == nil ? safeAreaInsets : .zero
         let scale = window?.screen.scale ?? traitCollection.displayScale
         let size = [Double(bounds.width), Double(bounds.height), Double(scale), Double(s.top), Double(s.left),
-                    Double(s.bottom), Double(s.right), Double(Host.shared.root.keyboard)]
+                    Double(s.bottom), Double(s.right), Double(keyboardCover)]
         if size == lastSize || bounds.width == 0 { return }
         lastSize = size
         Go.send(Event.resized(id: id, width: size[0], height: size[1], scale: size[2], safeTop: size[3],

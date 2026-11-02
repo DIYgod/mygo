@@ -37,6 +37,8 @@ public enum ApplicationEvent {
     case pushToken(Data)
     case pushError(Error)
     case pushMessage([AnyHashable: Any])
+    /// The user tapped a push's notification.
+    case pushOpened([AnyHashable: Any])
 }
 
 /// What plugins have of the host.

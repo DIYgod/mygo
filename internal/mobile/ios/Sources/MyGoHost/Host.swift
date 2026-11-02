@@ -375,12 +375,21 @@ final class Host: NSObject, HostCalls, UNUserNotificationCenterDelegate, UIDocum
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent n: UNNotification,
                                 withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // The app on screen hears of a push here: UIKit's other way needs a
+        // background mode and a flag in the push.
+        if n.request.trigger is UNPushNotificationTrigger {
+            PluginHost.applicationEvent(.pushMessage(n.request.content.userInfo))
+        }
         done([.banner, .list, .sound])
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler done: @escaping () -> Void) {
-        Go.send(Event.notificationClicked(notificationID: response.notification.request.identifier))
+        let n = response.notification
+        if n.request.trigger is UNPushNotificationTrigger {
+            PluginHost.applicationEvent(.pushOpened(n.request.content.userInfo))
+        }
+        Go.send(Event.notificationClicked(notificationID: n.request.identifier))
         done()
     }
 

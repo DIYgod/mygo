@@ -71,6 +71,7 @@ class MyGoActivity : ComponentActivity() {
 
     private fun openIntent(intent: Intent?) {
         intent ?: return
+        PluginHost.onIntent?.invoke(intent)
         // A notification tapped: once, as the Activity is made again with
         // the same Intent after Android ends the process.
         intent.getStringExtra("mygo.notification")?.let {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -86,7 +87,7 @@ func attachDevState(h *windowHost) {
 			rt.dev.kept, last = &k, data
 		}
 	}
-	restoreElement, restoreLocal, noteRouter = keptElementFor, keptLocalFor, noteDevRouter
+	restoreElement, restoreLocal, noteRouter, routerBuilt = keptElementFor, keptLocalFor, noteDevRouter, devRouterBuilt
 	if os.MkdirAll(filepath.Dir(path), 0o755) != nil {
 		return
 	}
@@ -124,8 +125,10 @@ func attachDevState(h *windowHost) {
 type devState struct {
 	// kept is what the last run wrote, until the elements come.
 	kept *keptWindow
-	// routers are the routers on show, by their element.
+	// routers are the routers on show, by their element, and first what the last
+	// one to come back would have shown.
 	routers map[uint64]*Router
+	first   devFirstRoute
 }
 
 func localKey(key any) (string, bool) {
@@ -238,6 +241,7 @@ func noteDevRouter(r *Router, e *node) {
 		return
 	}
 	if k := rt.dev.kept.Routers[strconv.FormatUint(id, 10)]; k != nil && len(k.Locs) > 0 && k.At >= 0 && k.At < len(k.Locs) {
+		rt.dev.first = devFirstRoute{r, slices.Clone(r.entries), r.at, r.pages}
 		r.entries = r.entries[:0]
 		for i, loc := range k.Locs {
 			entry := &routeEntry{loc: loc}
@@ -248,5 +252,30 @@ func noteDevRouter(r *Router, e *node) {
 		}
 		r.at, r.pages = k.At, k.Next
 		delete(rt.dev.kept.Routers, strconv.FormatUint(id, 10)) // taken once
+	}
+}
+
+// devFirstRoute is where a router would have started, had it not come back.
+type devFirstRoute struct {
+	r       *Router
+	entries []*routeEntry
+	at      int
+	pages   uint64
+}
+
+// devRouterBuilt takes a router back to where it would have started if what it
+// came back to shows nothing: the change of the code removed that route, and it
+// would write the blank page down for the next run too.
+func devRouterBuilt(r *Router, box *node) {
+	rt := box.c.rt
+	if rt.dev == nil || rt.dev.first.r != r {
+		return
+	}
+	first := rt.dev.first
+	rt.dev.first = devFirstRoute{}
+	if page := box.first; page == nil || page.first == nil {
+		r.entries, r.at, r.pages = first.entries, first.at, first.pages
+		r.view = routeView{}
+		rt.requestFrame()
 	}
 }

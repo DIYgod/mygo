@@ -3,6 +3,17 @@ import UserNotifications
 
 final class PushPlugin: MyGoPlugin {
     private var waiting: PluginReply?
+    private var lastMessage = ""
+    private var lastMessageAt = Date.distantPast
+    /// A tap that launched the app comes before Go listens.
+    private var opened: [[String: Any]] = []
+    private var listening = false
+
+    private func plain(_ info: [AnyHashable: Any]) -> [String: Any] {
+        var out: [String: Any] = [:]
+        for (k, v) in info where JSONSerialization.isValidJSONObject([v]) { out["\(k)"] = v }
+        return out
+    }
 
     func call(_ method: String, _ args: [String: Any], _ reply: @escaping PluginReply) {
         switch method {
@@ -20,6 +31,11 @@ final class PushPlugin: MyGoPlugin {
                     UIApplication.shared.registerForRemoteNotifications()
                 }
             }
+        case "listenOpened":
+            listening = true
+            for o in opened { PluginHost.emit("push", "opened", o) }
+            opened = []
+            reply(.success(nil))
         default:
             reply(.failure(PluginFailure("NoMethod", method)))
         }
@@ -38,9 +54,19 @@ final class PushPlugin: MyGoPlugin {
             waiting?(.failure(PluginFailure("Failed", e.localizedDescription)))
             waiting = nil
         case .pushMessage(let info):
-            var out: [String: Any] = [:]
-            for (k, v) in info where JSONSerialization.isValidJSONObject([v]) { out["\(k)"] = v }
-            PluginHost.emit("push", "message", out)
+            // UIKit tells some twice: as it arrives, and as it would show.
+            let key = String(describing: info)
+            let now = Date()
+            if key == lastMessage && now.timeIntervalSince(lastMessageAt) < 2 { return }
+            lastMessage = key
+            lastMessageAt = now
+            PluginHost.emit("push", "message", plain(info))
+        case .pushOpened(let info):
+            if listening {
+                PluginHost.emit("push", "opened", plain(info))
+            } else {
+                opened.append(plain(info))
+            }
         }
     }
 }

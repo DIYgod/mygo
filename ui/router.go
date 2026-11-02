@@ -536,6 +536,9 @@ func (r *Router) coreView(c *context, fn func(r *Route)) *node {
 		r.noteBack(c)
 	}
 	r.build(c, box, &r.view, nil, fn)
+	if routerBuilt != nil {
+		routerBuilt(r, box)
+	}
 	return box
 }
 

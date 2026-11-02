@@ -54,3 +54,14 @@ func OnToken(fn func(token string)) (off func()) {
 // OnMessage calls fn on the main thread as a push arrives while the app runs,
 // with what it carries, as JSON.
 func OnMessage(fn func(data []byte)) (off func()) { return mygo.Native(pluginID).On("message", fn) }
+
+// OnOpened calls fn on the main thread as the user taps a push's notification, with
+// what it carries, as JSON: also the tap that launched the app, once this listens,
+// so call it as the app is ready.
+func OnOpened(fn func(data []byte)) (off func()) {
+	off = mygo.Native(pluginID).On("opened", fn)
+	mygo.App.WhenReady(func() {
+		go mygo.Native(pluginID).Call(context.Background(), "listenOpened", nil, nil)
+	})
+	return off
+}

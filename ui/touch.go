@@ -38,6 +38,7 @@ var (
 	restoreElement func(rt *engine, s *state)
 	restoreLocal   func(s *state, key, v any)
 	noteRouter     func(r *Router, e *node)
+	routerBuilt    func(r *Router, e *node)
 	// contentStretch transforms what a scroll container holds, on Android.
 	contentStretch func(world scene.Affine, e *node) scene.Affine
 	// insetRoot keeps the content out from under what covers the
