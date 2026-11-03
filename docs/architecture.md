@@ -4470,7 +4470,14 @@ renderer's (`gputest.Compare`).
     processes, unlike `keyedID`'s per-process seed), which a reload applies
     as the elements are created in its first frame and drops for an element
     that moved. The text of an input is the app's own state, which
-    `App.OnReload` brings back.
+    `App.OnReload` brings back. A router's history comes back by the order
+    routers first show in (`engine.reloadRouter`), since the edit that needs a
+    restart often changes what is around one, and a web view's page with
+    the first page the new build loads of the same site (`reloadedURL`).
+    All of it, fields of `node`, `state`, `engine` and `surface.Conn` included,
+    is behind the tag: production builds have empty structs and empty functions
+    (`ui/reload_off.go`, `reload_off.go`, `internal/surface/reload_off.go`),
+    and the public API does nothing.
   - *Noticing.* With `-hot`, the watcher also looks when the system tells of
     a change. Polling stays the source of truth of what changed: a
     notifier (`notify_*.go`: kqueue on the files on macOS, inotify on the

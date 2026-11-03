@@ -38,6 +38,10 @@ resources or the catalogs of messages rebuild the app, regenerate the
 TypeScript client and the accessors of the catalogs, and relaunch it. A build that fails to compile keeps the previous one running; the next
 change tries again. Frontend changes are left to the dev server. Quitting the app ends mygo dev.
 
+Relaunching hands what should not be lost to the next build: where the windows
+are, the page they show, scrolling and focus, and what the app says with
+App.OnReload. -no-reload-state starts every build fresh.
+
 With -hot, saving Go code changes the running app in place, in about a tenth of a
 second: its windows, web pages and memory stay. What that cannot carry, as a
 struct that changed its layout, rebuilds and relaunches it as above.

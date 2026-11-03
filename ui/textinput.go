@@ -55,14 +55,7 @@ func textInputBase(c *context, value *string, multiline bool) *node {
 		ed.setText(*value)
 		ed.compose = ""
 	}
-	if st.reloadSel {
-		// Where the caret and the selection of the input the user was in
-		// were. Its text is the app's own state, which Restore brought
-		// back before this frame, and is not touched here.
-		st.reloadSel = false
-		ed.caret = min(st.reloadCaret, ed.buf.n)
-		ed.anchor = min(st.reloadAnchor, ed.buf.n)
-	}
+	st.reloadTakeCaret(ed)
 	ed.rebuild()
 	ed.ranges = ed.ranges[:0]
 	e.onValueInput(stringInput)
