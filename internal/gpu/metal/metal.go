@@ -1660,6 +1660,7 @@ func (r *Renderer) render(s *scene.Scene) error {
 	}
 	r.diff.Wide = r.wide
 	damage, known := r.diff.Diff(s)
+	println("DBG render", s.Width, s.Height, "changed", changed, "sync", sync, "known", known, "damage", len(damage), "pending", r.pending.cb != 0)
 	if known && len(damage) == 0 && !sync {
 		r.redrew = redrewNothing
 		return nil

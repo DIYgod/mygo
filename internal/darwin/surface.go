@@ -369,6 +369,7 @@ func (s *surface) FrameNow() {
 // draws what the one left would have, and the content draws that one no
 // more: deferred holds only while the last frame sent was left.
 func (s *surface) frameNow(paced bool) {
+	println("DBG frameNow paced", paced, "caPass", caPass)
 	s.resized = false
 	s.framePass = caPass
 	armPass()
@@ -905,6 +906,7 @@ func registerSurfaceClass() {
 			// frame's start, which comes before its commit, while a
 			// display at rest refreshes slower than at its fastest.
 			resizedSoon := s.resized && time.Since(s.lastFrame) < 2*s.refresh()
+			println("DBG updateLayer framePass", s.framePass, "caPass", caPass, "resized", s.resized, "pwt", s.presentsWithTransaction(), "live", send(self, "inLiveResize") != 0, "since", time.Since(s.lastFrame).String(), "inFrameSend", s.w != nil)
 			if (s.framePass == caPass || resizedSoon) && send(self, "inLiveResize") == 0 && (!s.resized || s.presentsWithTransaction()) {
 				// AppKit displays the view again before Core Animation
 				// commits the frame drawn in this pass, as while the
@@ -937,6 +939,7 @@ func registerSurfaceClass() {
 				return
 			}
 			s.due = false
+			println("DBG tick needsDisplay", sendBool(send(self, "layer"), "needsDisplay"))
 			if sendBool(send(self, "layer"), "needsDisplay") {
 				// AppKit displays the view in this pass, as after a
 				// resize (the view's needsDisplay tells nothing): the
@@ -956,6 +959,7 @@ func registerSurfaceClass() {
 			sendSuperSize(self, "MyGoSurfaceView", cmd, size)
 			if s := b().surfaceOf(self); s != nil {
 				s.resized = true
+				println("DBG setFrameSize", int(size.Width), int(size.Height), "caPass", caPass)
 				s.send(platform.SurfaceEvent{Kind: platform.SurfaceResize})
 				send(self, "setNeedsDisplay:", 1)
 			}

@@ -559,6 +559,9 @@ func (rt *engine) themeChanged() {
 
 // runFrame builds, lays out, paints and presents a frame.
 func (rt *engine) runFrame() {
+	if w, h, _ := rt.size(); true {
+		println("DBG runFrame", rt.frame+1, int(w), int(h), "inFrame", rt.inFrame)
+	}
 	if rt.inFrame || rt.closed {
 		return
 	}
@@ -844,6 +847,7 @@ func (rt *engine) repaintNow() {
 // elements painted again when only drawings moved since, else a frame
 // built anew.
 func (rt *engine) surfaceFrame() {
+	println("DBG surfaceFrame")
 	if rt.holdFrame() {
 		return
 	}
@@ -1068,6 +1072,7 @@ func (rt *engine) keptAlive(s *state) bool {
 // built. It comes in place of one Painter.After has due.
 func (rt *engine) requestFrame() {
 	if rt.inFrame {
+		println("DBG requestFrame dropped inFrame")
 		return
 	}
 	rt.redraw, rt.repaintDue = false, time.Time{}
