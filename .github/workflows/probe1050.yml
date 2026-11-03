@@ -1,0 +1,28 @@
+name: Probe 1050
+on:
+  push:
+    branches: ['claude/tmp-1050-probe']
+permissions:
+  contents: read
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test -c -o e2e.test ./internal/e2e
+      - name: Toggle test with the veto (before the fix)
+        continue-on-error: true
+        env: { MYGO_E2E: 1, MYGO_PROBE: 1, MYGO_PROBE_VETO: 1 }
+        run: ./e2e.test -test.v -test.count=1 -test.timeout=6m -test.run 'TestTrayPopoverToggle$'
+      - name: Toggle test with the fix
+        continue-on-error: true
+        env: { MYGO_E2E: 1, MYGO_PROBE: 1 }
+        run: ./e2e.test -test.v -test.count=1 -test.timeout=6m -test.run 'TestTrayPopoverToggle$'
+      - name: Flyout tests with the fix
+        env: { MYGO_E2E: 1 }
+        continue-on-error: true
+        run: ./e2e.test -test.v -test.count=1 -test.timeout=6m -test.run 'Flyout|Popover|Tray'
