@@ -905,7 +905,7 @@ func registerSurfaceClass() {
 			// frame's start, which comes before its commit, while a
 			// display at rest refreshes slower than at its fastest.
 			resizedSoon := s.resized && time.Since(s.lastFrame) < 2*s.refresh()
-			if (s.framePass == caPass || resizedSoon && false) && send(self, "inLiveResize") == 0 && (!s.resized || s.presentsWithTransaction()) {
+			if (s.framePass == caPass || resizedSoon) && send(self, "inLiveResize") == 0 && (!s.resized || s.presentsWithTransaction()) {
 				// AppKit displays the view again before Core Animation
 				// commits the frame drawn in this pass, as while the
 				// trackpad scrolls. The next refresh draws it: as one just
