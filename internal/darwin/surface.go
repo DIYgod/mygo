@@ -905,7 +905,7 @@ func registerSurfaceClass() {
 			// below. Right after is within two refreshes of the last
 			// frame's start, which comes before its commit, while a
 			// display at rest refreshes slower than at its fastest.
-			resizedSoon := s.resized && time.Since(s.lastFrame) < 2*s.refresh()
+			resizedSoon := s.resized
 			println("DBG updateLayer framePass", s.framePass, "caPass", caPass, "resized", s.resized, "pwt", s.presentsWithTransaction(), "live", send(self, "inLiveResize") != 0, "since", time.Since(s.lastFrame).String(), "inFrameSend", s.w != nil)
 			if (s.framePass == caPass || resizedSoon) && send(self, "inLiveResize") == 0 && (!s.resized || s.presentsWithTransaction()) {
 				// AppKit displays the view again before Core Animation
