@@ -73,7 +73,7 @@ framework safely. Read it before changing anything under `internal/`.
 ├── events.go           listener lists and the Preventable event types
 ├── single_instance.go  RequestSingleInstanceLock over a Unix socket
 ├── dev.go signal_*.go  IsDev, the `mygo dev` ready signal, quitting on SIGINT/SIGTERM
-├── reload*.go          what a build of `mygo dev` hands the build that replaces it
+├── reload*.go          what a build of `mygo dev -hot` hands the build that replaces it
 ├── backend_*.go        picks the backend per GOOS
 ├── internal/
 │   ├── platform/       the contract every backend implements
@@ -4436,7 +4436,8 @@ renderer's (`gputest.Compare`).
     end the processes it started; those left after it exits are killed. A
     build that fails to compile leaves the old one running; one that fails
     to start leaves none until the next change.
-    Before the running build is asked to quit, it is asked for its state:
+    With `-hot`, before the running build is asked to quit, it is asked for
+    its state:
     the app connects at startup to a socket `mygo dev` listens on in the
     per-user runtime directory (`mygo-dev-<uid>-<nonce>.sock`, mode 0600,
     named `MYGO_DEV_SOCKET` in the environment, unset at once so the
