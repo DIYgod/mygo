@@ -4077,7 +4077,14 @@ either.
     shows no stretched frames; the others present as soon as the GPU has
     them (`presentDrawable:`), sparing a pass of AppKit's display cycle
     and a commit of the transaction each: an animation at 120 Hz takes
-    about half the main thread's time it would. The main thread never
+    about half the main thread's time it would. A resize's frame that
+    AppKit asks for (`updateLayer`) within two refreshes of one presented
+    with the transaction, in a later pass of the run loop, as for a
+    window resized from its view, or right after the frame that took
+    back the drawables given back when idle, draws at the next refresh:
+    presented with the transaction too before the window server showed
+    the first, it never showed, and the window kept the first stretched
+    to its new size (#1044). The main thread never
     waits for the display: after each frame presented as soon as drawn, a
     goroutine on a thread of its own (`present.go`) takes the next frame's
     drawable, which `nextDrawable` holds back while the display holds the

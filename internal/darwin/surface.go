@@ -381,14 +381,20 @@ func (s *surface) frameNow(paced bool) {
 // does the frames that change it: the frame drawn last then takes a
 // drawable until the transaction commits.
 func (s *surface) presentsWithTransaction() bool {
+	l := s.metalLayer()
+	return l != 0 && sendBool(l, "presentsWithTransaction")
+}
+
+// metalLayer returns the GPU renderer's CAMetalLayer, or nil without one.
+func (s *surface) metalLayer() id {
 	sublayers := send(send(s.view, "layer"), "sublayers")
 	metalLayer := uintptr(class("CAMetalLayer"))
 	for i := range sendInt(sublayers, "count") {
 		if l := send(sublayers, "objectAtIndex:", uintptr(i)); sendBool(l, "isKindOfClass:", metalLayer) {
-			return sendBool(l, "presentsWithTransaction")
+			return l
 		}
 	}
-	return false
+	return 0
 }
 
 // Occluded reports whether nothing of the window shows on screen: hidden,
@@ -888,18 +894,30 @@ func registerSurfaceClass() {
 			if s == nil {
 				return
 			}
-			if s.framePass == caPass && send(self, "inLiveResize") == 0 && (!s.resized || s.presentsWithTransaction()) {
+			// A frame for a new size right after one presented with the
+			// transaction, as a window resized from its view, or right
+			// after a frame that changed the layer, is presented with the
+			// transaction too. Drawn at once in a later pass, before the
+			// window server showed the first, it never shows: the screen
+			// keeps the first, stretched to the new size, and nothing
+			// draws again (#1044). It waits for the next refresh, as
+			// below. Right after is within two refreshes of the last
+			// frame's start, which comes before its commit, while a
+			// display at rest refreshes slower than at its fastest.
+			resizedSoon := s.resized && time.Since(s.lastFrame) < 2*s.refresh()
+			if (s.framePass == caPass || resizedSoon) && send(self, "inLiveResize") == 0 && (!s.resized || s.presentsWithTransaction()) {
 				// AppKit displays the view again before Core Animation
 				// commits the frame drawn in this pass, as while the
 				// trackpad scrolls. The next refresh draws it: as one just
 				// drew, not at once; and after a frame presented with the
 				// transaction, the frame would wait a second for a
-				// drawable, the layer's two being taken until the commit.
-				// A frame for a new size after one presented at once, as
-				// those of the display link's ticks are, draws at once, or
-				// the layer would stretch the last one meanwhile. A window
-				// that resizes, as zooming animates it, displays the view
-				// for each of its sizes within one pass of the run loop,
+				// drawable, the layer's two being taken until the commit,
+				// or, in a later pass, not show (above). A frame for a new
+				// size after one presented at once, as those of the
+				// display link's ticks are, draws at once, or the layer
+				// would stretch the last one meanwhile. A window that
+				// resizes, as zooming animates it, displays the view for
+				// each of its sizes within one pass of the run loop,
 				// committing each: those frames draw at once too.
 				s.lastFrame = time.Now()
 				s.RequestFrame()
