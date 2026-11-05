@@ -1,7 +1,7 @@
 . "$env:VM\lib.ps1"
 $sd = "$env:RUNNER_TEMP\selawik"; New-Item -ItemType Directory -Force $sd | Out-Null
 gh release list --repo microsoft/Selawik --limit 5
-gh release download --repo microsoft/Selawik -D $sd --skip-existing
+gh release download 1.01 --repo microsoft/Selawik -D $sd --pattern '*' --skip-existing
 Get-ChildItem $sd -Filter *.zip | ForEach-Object { Expand-Archive $_.FullName -DestinationPath "$sd\$($_.BaseName)" -Force }
 Get-ChildItem "$env:RUNNER_TEMP\selawik" -Recurse -Include *.ttf | ForEach-Object { $_.FullName }
 $ttf = Get-ChildItem "$env:RUNNER_TEMP\selawik" -Recurse -Include selawksl.ttf | Select-Object -First 1
