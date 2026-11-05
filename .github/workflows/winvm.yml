@@ -1,0 +1,46 @@
+# Temporary: Windows checks of open PRs on GitHub's Windows runners, for
+# what CI's tests can't see (screenshots, UI Automation, real input). Each
+# check is .github/winvm/<pr>.ps1, run on that PR's head; its files are
+# uploaded as an artifact.
+name: winvm
+on:
+  push:
+    branches: [claude/project-thread-txkv0s]
+    paths: [".github/workflows/winvm.yml", ".github/winvm/**"]
+permissions:
+  contents: read
+concurrency:
+  group: winvm
+  cancel-in-progress: true
+jobs:
+  check:
+    name: ${{ matrix.pr }} ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-11-arm, windows-2025]
+        pr: [1232]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: vm }
+      - uses: actions/checkout@v4
+        with: { path: pr, ref: "refs/pull/${{ matrix.pr }}/head" }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: pr/go.mod, cache-dependency-path: pr/go.sum }
+      - name: check
+        shell: powershell
+        working-directory: pr
+        env:
+          OUT: ${{ runner.temp }}\out
+          VM: ${{ github.workspace }}\vm\.github\winvm
+        run: |
+          New-Item -ItemType Directory -Force $env:OUT | Out-Null
+          git log -1 --format='%H %s' | Tee-Object "$env:OUT\head.txt"
+          & "$env:VM\${{ matrix.pr }}.ps1" *>&1 | Tee-Object "$env:OUT\log.txt"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pr }}-${{ matrix.os }}
+          path: ${{ runner.temp }}\out
