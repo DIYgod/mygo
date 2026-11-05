@@ -38,8 +38,10 @@ func TestWritingMode(t *testing.T) {
 	if three.W < 3*one.W-0.5 || three.W > 3*one.W+0.5 || three.H != 30 {
 		t.Errorf("three columns are %v×%v, one %v wide", three.W, three.H, one.W)
 	}
-	if across.W < 79 || across.W > 81 {
-		t.Errorf("the kana across are %v wide", across.W)
+	// Across, the kana keep the font's own advances, which differ between
+	// the fonts each system falls back to, but set eight in a row.
+	if across.W < 4*one.W {
+		t.Errorf("the kana across are %v wide, a column %v", across.W, one.W)
 	}
 	if h := rect("tall").H; h != 80 {
 		t.Errorf("a column of eight kana is %v long, want 80", h)
