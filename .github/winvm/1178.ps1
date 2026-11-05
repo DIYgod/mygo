@@ -8,13 +8,13 @@ function Round($tag, $appTheme) {
   $p = StartApp "$env:RUNNER_TEMP\menus.exe" @($appTheme) 4
   Shot "$tag-window"
   # Menu bar dropdown and a submenu.
-  [void][W]::SetForegroundWindow($p.MainWindowHandle); Start-Sleep -Milliseconds 400
+  FrontWindow $p.MainWindowHandle; Start-Sleep -Milliseconds 400
   KeyDown $VK.ALT; Key 0x46; KeyUp $VK.ALT
   Burst "$tag-menubar"; Start-Sleep -Milliseconds 600; Shot "$tag-menubar"
   Key $VK.DOWN; Key $VK.DOWN; Key $VK.DOWN; Key $VK.DOWN; Key $VK.RIGHT; Start-Sleep -Milliseconds 700; Shot "$tag-submenu"
   Key $VK.ESC; Key $VK.ESC; Key $VK.ESC; Start-Sleep -Milliseconds 400
   # Context menu, from the button, at the pointer.
-  [void][W]::SetForegroundWindow($p.MainWindowHandle); Start-Sleep -Milliseconds 300
+  FrontWindow $p.MainWindowHandle; Start-Sleep -Milliseconds 300
   $r = New-Object System.Drawing.Rectangle
   Add-Type -Namespace U -Name R -MemberDefinition '[DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out System.Drawing.Rectangle r);' -ErrorAction SilentlyContinue
   [void][U.R]::GetWindowRect($p.MainWindowHandle, [ref]$r)  # Left, Top, Right, Bottom in X, Y, Width, Height

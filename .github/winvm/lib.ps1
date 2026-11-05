@@ -72,11 +72,20 @@ function BuildCheck($dir, $exe) {
 
 # Starts an app and waits for its window to be up; returns the process.
 function StartApp($exe, $arguments = @(), $wait = 4) {
-  $p = if ($arguments.Count) { Start-Process $exe -ArgumentList $arguments -PassThru -RedirectStandardOutput "$env:OUT\$([IO.Path]::GetFileNameWithoutExtension($exe))-stdout.txt" -RedirectStandardError "$env:OUT\$([IO.Path]::GetFileNameWithoutExtension($exe))-stderr.txt" } else { Start-Process $exe -PassThru -RedirectStandardOutput "$env:OUT\$([IO.Path]::GetFileNameWithoutExtension($exe))-stdout.txt" -RedirectStandardError "$env:OUT\$([IO.Path]::GetFileNameWithoutExtension($exe))-stderr.txt" }
+  $p = if ($arguments.Count) { Start-Process $exe -NoNewWindow -ArgumentList $arguments -PassThru -RedirectStandardOutput "$env:OUT\$([IO.Path]::GetFileNameWithoutExtension($exe))-stdout.txt" -RedirectStandardError "$env:OUT\$([IO.Path]::GetFileNameWithoutExtension($exe))-stderr.txt" } else { Start-Process $exe -NoNewWindow -PassThru -RedirectStandardOutput "$env:OUT\$([IO.Path]::GetFileNameWithoutExtension($exe))-stdout.txt" -RedirectStandardError "$env:OUT\$([IO.Path]::GetFileNameWithoutExtension($exe))-stderr.txt" }
   for ($i = 0; $i -lt 40 -and $p.MainWindowHandle -eq 0; $i++) { Start-Sleep -Milliseconds 250; $p.Refresh() }
   Start-Sleep -Seconds $wait
-  if ($p.MainWindowHandle -ne 0) { [void][W]::SetForegroundWindow($p.MainWindowHandle) }
+  if ($p.MainWindowHandle -ne 0) { FrontWindow $p.MainWindowHandle }
   $p
+}
+
+# Brings a window to the front; an Alt press first lets this process do it.
+function FrontWindow($h) {
+  if ([W]::GetForegroundWindow() -eq $h) { return }
+  # F24, which nothing takes, as the last input lets this process change the foreground.
+  [W]::keybd_event(0x87, 0, 0, [UIntPtr]::Zero); [W]::keybd_event(0x87, 0, 2, [UIntPtr]::Zero)
+  [void][W]::SetForegroundWindow($h); Start-Sleep -Milliseconds 300
+  if ([W]::GetForegroundWindow() -ne $h) { "warning: window $h is not in front" }
 }
 
 # UI Automation.
@@ -100,6 +109,8 @@ function Prep {
   Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { "window: $($_.ProcessName) '$($_.MainWindowTitle)'" }
   foreach ($n in 'WWAHost', 'CloudExperienceHost', 'CloudExperienceHostBroker', 'UserOOBEBroker') { Get-Process $n -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
   Start-Sleep 2
+  # Closing it can leave the Start menu open.
+  [W]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero); [W]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero); Start-Sleep 1
   Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { "window after: $($_.ProcessName) '$($_.MainWindowTitle)'" }
   Shot prep | Out-Null
 }

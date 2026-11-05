@@ -3,7 +3,7 @@ BuildCheck held "$env:RUNNER_TEMP\held.exe"
 $log = "$env:OUT\held-stdout.txt"
 function Mark($s) { "---- $s"; Add-Content "$env:OUT\marks.txt" "$((Get-Date).ToString('HH:mm:ss.fff')) $s" }
 function Last { $l = Get-Content $log | Select-Object -Last 1; "   app: $l" }
-function Front { [void][W]::SetForegroundWindow($p.MainWindowHandle); Start-Sleep -Milliseconds 500 }
+function Front { FrontWindow $p.MainWindowHandle; Start-Sleep -Milliseconds 500 }
 $F = 0x46
 $p = StartApp "$env:RUNNER_TEMP\held.exe"
 Front

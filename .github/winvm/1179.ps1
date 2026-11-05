@@ -10,7 +10,7 @@ Stop-Process $p -Force
 # Narrator runs once, against an open popup; its speech can't be heard here.
 $p = StartApp "$env:RUNNER_TEMP\listbox.exe"
 $n = Start-Process "$env:WINDIR\System32\Narrator.exe" -PassThru; Start-Sleep 6
-[void][W]::SetForegroundWindow($p.MainWindowHandle); Start-Sleep 1
+FrontWindow $p.MainWindowHandle; Start-Sleep 1
 Key $VK.TAB; Key $VK.SPACE; Start-Sleep 1; Key $VK.DOWN; Start-Sleep 2
 Shot listbox-narrator
 "app alive with Narrator: $(-not $p.HasExited)"

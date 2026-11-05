@@ -9,7 +9,7 @@ Stop-Process $p -Force
 "== Narrator smoke"
 $p = StartApp "$env:RUNNER_TEMP\roles.exe"
 $n = Start-Process "$env:WINDIR\System32\Narrator.exe" -PassThru; Start-Sleep 6
-[void][W]::SetForegroundWindow($p.MainWindowHandle); Start-Sleep 1
+FrontWindow $p.MainWindowHandle; Start-Sleep 1
 python "$env:VM\roles.py" $env:VM 'Roles check' 'Add message' 'Show error'
 "app alive with Narrator: $(-not $p.HasExited)"
 Get-Process Narrator -ErrorAction SilentlyContinue | Stop-Process -Force
