@@ -1,4 +1,5 @@
 . "$env:VM\lib.ps1"
+python -m pip install -q comtypes
 BuildCheck menus "$env:RUNNER_TEMP\menus.exe"
 $pers = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
 "theme settings before:"; Get-ItemProperty $pers -ErrorAction SilentlyContinue | Select-Object AppsUseLightTheme, SystemUsesLightTheme, EnableTransparency | Format-List | Out-String
@@ -11,7 +12,7 @@ function Round($tag, $appTheme) {
   FrontWindow $p.MainWindowHandle; Start-Sleep -Milliseconds 400
   KeyDown $VK.ALT; Key 0x46; KeyUp $VK.ALT
   Burst "$tag-menubar"; Start-Sleep -Milliseconds 600; Shot "$tag-menubar"
-  Key $VK.DOWN; Key $VK.DOWN; Key $VK.DOWN; Key $VK.DOWN; Key $VK.RIGHT; Start-Sleep -Milliseconds 700; Shot "$tag-submenu"
+  Key $VK.DOWN; Key $VK.DOWN; Key $VK.DOWN; Key $VK.RIGHT; Start-Sleep -Milliseconds 700; Shot "$tag-submenu"
   Key $VK.ESC; Key $VK.ESC; Key $VK.ESC; Start-Sleep -Milliseconds 400
   # Context menu, from the button, at the pointer.
   FrontWindow $p.MainWindowHandle; Start-Sleep -Milliseconds 300
@@ -25,11 +26,14 @@ function Round($tag, $appTheme) {
   Key $VK.ESC; Start-Sleep -Milliseconds 400
   # Alt+Space stays Windows' own menu.
   KeyDown $VK.ALT; Key $VK.SPACE; KeyUp $VK.ALT; Start-Sleep -Milliseconds 700; Shot "$tag-altspace"; Key $VK.ESC
-  # The tray icon, right-clicked where it is.
+  # The tray icon on the taskbar, right-clicked where it is.
   $line = Get-Content "$env:OUT\menus-stdout.txt" | Where-Object { $_ -like 'tray *' } | Select-Object -First 1
   "tray bounds: $line"
-  if ($line) {
-    $t = $line.Split(' '); $tx = [int]$t[1] + [int]$t[3] / 2; $ty = [int]$t[2] + [int]$t[4] / 2
+  $icon = python "$env:VM\find.py" $env:VM 'Menus check' | Where-Object { $_ -like 'rect|*|Button|*' } | Select-Object -First 1
+  "tray button: $icon"
+  if ($icon) {
+    $f = $icon.Split('|'); $tx = [int]$f[3] + [int]$f[5] / 2; $ty = [int]$f[4] + [int]$f[6] / 2
+    MouseTo $tx $ty; Start-Sleep -Milliseconds 300
     Shot "$tag-taskbar"
     Click $tx $ty -right
     Burst "$tag-tray"; Start-Sleep -Milliseconds 600; Shot "$tag-tray" -cursor
@@ -37,6 +41,22 @@ function Round($tag, $appTheme) {
   }
   Stop-Process $p -Force; Start-Sleep 1
   Copy-Item "$env:OUT\menus-stdout.txt" "$env:OUT\$tag-stdout.txt" -ErrorAction SilentlyContinue
+}
+"== the icon in the overflow"
+$p = StartApp "$env:RUNNER_TEMP\menus.exe" @('light') 4
+$chev = python "$env:VM\find.py" $env:VM 'Show hidden icons' | Select-Object -First 1
+"chevron: $chev"
+if ($chev) {
+  $f = $chev.Split('|'); Click ([int]$f[3] + [int]$f[5] / 2) ([int]$f[4] + [int]$f[6] / 2); Start-Sleep 1
+  Shot overflow-open
+  $icon = python "$env:VM\find.py" $env:VM 'Menus check' | Where-Object { $_ -like 'rect|*|Button|*' } | Select-Object -First 1
+  "overflow icon: $icon"
+  if ($icon) { $f = $icon.Split('|'); $ox = [int]$f[3] + [int]$f[5] / 2 + 3; $oy = [int]$f[4] + [int]$f[6] / 2 + 2; Click $ox $oy -right; Burst overflow-tray; Start-Sleep -Milliseconds 600; Shot overflow-tray -cursor; "right-clicked at $ox,$oy"; Key $VK.ESC; Key $VK.ESC }
+}
+Stop-Process $p -Force; Start-Sleep 1
+Get-ChildItem 'HKCU:\Control Panel\NotifyIconSettings' -ErrorAction SilentlyContinue | ForEach-Object {
+  $k = Get-ItemProperty $_.PSPath
+  if ($k.ExecutablePath -like '*menus.exe') { Set-ItemProperty $_.PSPath IsPromoted 1; "promoted $($_.PSChildName)" }
 }
 Round light-on-light light
 Round dark-on-light dark

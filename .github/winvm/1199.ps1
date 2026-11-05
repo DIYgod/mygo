@@ -3,7 +3,7 @@ python -m pip install -q comtypes
 BuildCheck roles "$env:RUNNER_TEMP\roles.exe"
 $p = StartApp "$env:RUNNER_TEMP\roles.exe"
 Shot roles
-python "$env:VM\roles.py" $env:VM 'Roles check' 'Add message' 'Show error' 'Add message' 'Add message' 'Show error'
+python "$env:VM\roles.py" $env:VM 'Roles check' 'Add message' 'Show error' 'Add message' 'Add message' 'Show error' 'Announce'
 Shot roles-after
 Stop-Process $p -Force
 "== Narrator smoke"

@@ -37,6 +37,9 @@ func view(c *ui.Context) {
 				messages = append(messages, fmt.Sprintf("Message %d", len(messages)+1))
 			}
 			ui.Divider(c).Role(ui.RoleSeparator)
+			if ui.Button(c, "Announce").Clicked() {
+				c.Announce("Saved")
+			}
 			if ui.Button(c, "Show error").Clicked() {
 				errText = "Name is required"
 				if len(messages) > 3 {
