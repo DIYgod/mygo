@@ -34,7 +34,7 @@ Add-Type -Namespace U -Name R -MemberDefinition '[DllImport("user32.dll")] publi
 $r = New-Object System.Drawing.Rectangle; [void][U.R]::GetWindowRect($p.MainWindowHandle, [ref]$r)
 "window $($r.X),$($r.Y) to $($r.Width),$($r.Height)"
 KeyDown $F; Start-Sleep -Milliseconds 200; Last
-Click ($r.X + 120) ($r.Y + 70) -right; Start-Sleep -Milliseconds 600
+Click ($r.X + 120) ($r.Y + 100) -right; Start-Sleep -Milliseconds 600
 Shot held-context-menu; Last
 KeyUp $F; Start-Sleep -Milliseconds 300; Key $VK.ESC; Start-Sleep -Milliseconds 500; Last
 Mark '3: hold F, Alt+Tab away, release F elsewhere, come back'
@@ -72,9 +72,22 @@ Key 0x1A  # VK_IME_OFF
 Mark '2b: hold F with the IME off, IME on, release F'
 KeyDown $F; Start-Sleep -Milliseconds 200; Key 0x16; Start-Sleep -Milliseconds 200; Key 0x4E; Start-Sleep -Milliseconds 200; KeyUp $F; Start-Sleep -Milliseconds 400; Last
 Key $VK.ESC; Key 0x1A; Start-Sleep -Milliseconds 400; Last
+Stop-Process $p -Force -ErrorAction SilentlyContinue
+foreach ($side in 'pr', 'main') {
+  Mark "2c: the same composing in a plain SearchField, $side"
+  if ($side -eq 'pr') { BuildCheck ime "$env:RUNNER_TEMP\ime-pr.exe" } else { BuildOnMain ime "$env:RUNNER_TEMP\ime-main.exe" }
+  $q = StartApp "$env:RUNNER_TEMP\ime-$side.exe"; FrontWindow $q.MainWindowHandle
+  [void][U.K]::PostMessage($q.MainWindowHandle, 0x50, [IntPtr]::Zero, $hkl); Start-Sleep 1
+  Key 0x16; Start-Sleep -Milliseconds 500
+  KeyDown 0x4B; Start-Sleep -Milliseconds 300; Key 0x41; Start-Sleep -Milliseconds 300; KeyUp 0x4B; Start-Sleep -Milliseconds 300
+  Key 0x41; Start-Sleep -Milliseconds 700; Shot "ime-$side-composing"
+  Key $VK.ENTER; Start-Sleep -Milliseconds 500; Shot "ime-$side-committed"
+  Key 0x1A; Start-Sleep -Milliseconds 300
+  Stop-Process $q -Force; Start-Sleep 1
+  "$side log:"; Get-Content "$env:OUT\ime-$side-stdout.txt"
+}
 Set-WinUserLanguageList $before -Force
 "languages restored: $((Get-WinUserLanguageList | ForEach-Object { $_.LanguageTag }) -join '; ')"
-Stop-Process $p -Force
 "== app log"; Get-Content $log
 "== tests"
 go test ./ui -run Held -v 2>&1 | Select-String -Pattern '^(=== RUN|--- |ok|FAIL|PASS)'

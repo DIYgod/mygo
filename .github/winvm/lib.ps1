@@ -137,3 +137,21 @@ function Rects($title) {
   python "$env:VM\rects.py" $env:VM $title | ForEach-Object { $f = $_.Split('|'); if ($f[0] -eq 'rect') { $r[$f[1]] = @{ x = [int]$f[2]; y = [int]$f[3]; w = [int]$f[4]; h = [int]$f[5]; cx = [int]$f[2] + [int]$f[4] / 2; cy = [int]$f[3] + [int]$f[5] / 2 } } }
   $r
 }
+
+# Moves the mouse as a mouse does (absolute MOUSEEVENTF_MOVE), so that
+# Windows draws the cursor, which SetCursorPos alone leaves hidden on a VM.
+function MouseTo($x, $y) {
+  $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+  [W]::mouse_event(0x8001, [int]($x * 65535 / ($b.Width - 1)), [int]($y * 65535 / ($b.Height - 1)), 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 50
+}
+
+# Builds a check program against main, in a worktree of it.
+function BuildOnMain($dir, $exe) {
+  if (-not (Test-Path "$env:RUNNER_TEMP\main")) {
+    git fetch -q --depth 1 origin main
+    git worktree add -q "$env:RUNNER_TEMP\main" FETCH_HEAD
+  }
+  Push-Location "$env:RUNNER_TEMP\main"
+  try { BuildCheck $dir $exe } finally { Pop-Location }
+}
