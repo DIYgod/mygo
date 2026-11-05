@@ -16,6 +16,8 @@ public static class W {
   [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CURSORINFO ci);
   [DllImport("user32.dll")] public static extern bool DrawIconEx(IntPtr hdc, int x, int y, IntPtr icon, int w, int h, int step, IntPtr brush, int flags);
   [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i);
+  [StructLayout(LayoutKind.Sequential)] public struct ICONINFO { public bool fIcon; public int xHotspot; public int yHotspot; public IntPtr hbmMask; public IntPtr hbmColor; }
+  [DllImport("user32.dll")] public static extern bool GetIconInfo(IntPtr h, out ICONINFO ii);
 }
 '@
 [void][W]::SetProcessDPIAware()
@@ -27,7 +29,7 @@ function Shot($name, [switch]$cursor) {
   $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
   if ($cursor) {
     $ci = New-Object W+CURSORINFO; $ci.cbSize = [Runtime.InteropServices.Marshal]::SizeOf($ci)
-    if ([W]::GetCursorInfo([ref]$ci)) { $h = $g.GetHdc(); [void][W]::DrawIconEx($h, $ci.x, $ci.y, $ci.hCursor, 0, 0, 0, [IntPtr]::Zero, 3); $g.ReleaseHdc($h) }
+    if ([W]::GetCursorInfo([ref]$ci)) { $ii = New-Object W+ICONINFO; [void][W]::GetIconInfo($ci.hCursor, [ref]$ii); $h = $g.GetHdc(); [void][W]::DrawIconEx($h, $ci.x - $ii.xHotspot, $ci.y - $ii.yHotspot, $ci.hCursor, 0, 0, 0, [IntPtr]::Zero, 3); $g.ReleaseHdc($h) }
   }
   $g.Dispose()
   $bmp.Save("$env:OUT\$name.png", [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
@@ -102,3 +104,25 @@ function Prep {
   Shot prep | Out-Null
 }
 Prep
+
+# The cursor where it is, on what's under it, scaled up 4 times.
+function CursorShot($name) {
+  $ci = New-Object W+CURSORINFO; $ci.cbSize = [Runtime.InteropServices.Marshal]::SizeOf($ci)
+  [void][W]::GetCursorInfo([ref]$ci)
+  $ii = New-Object W+ICONINFO; [void][W]::GetIconInfo($ci.hCursor, [ref]$ii)
+  $s = 64; $bmp = New-Object System.Drawing.Bitmap $s, $s
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.CopyFromScreen($ci.x - $s / 2, $ci.y - $s / 2, 0, 0, (New-Object System.Drawing.Size $s, $s))
+  $h = $g.GetHdc(); [void][W]::DrawIconEx($h, $s / 2 - $ii.xHotspot, $s / 2 - $ii.yHotspot, $ci.hCursor, 0, 0, 0, [IntPtr]::Zero, 3); $g.ReleaseHdc($h); $g.Dispose()
+  $z = New-Object System.Drawing.Bitmap ($s * 4), ($s * 4)
+  $g = [System.Drawing.Graphics]::FromImage($z); $g.InterpolationMode = 'NearestNeighbor'; $g.PixelOffsetMode = 'Half'; $g.DrawImage($bmp, 0, 0, $s * 4, $s * 4); $g.Dispose()
+  $z.Save("$env:OUT\$name.png", [System.Drawing.Imaging.ImageFormat]::Png); $z.Dispose(); $bmp.Dispose()
+  "cursor $name handle=$($ci.hCursor) flags=$($ci.flags) hotspot=$($ii.xHotspot),$($ii.yHotspot) size=$([W]::GetSystemMetrics(13))x$([W]::GetSystemMetrics(14))"
+}
+
+# The screen rectangles of a window's named elements, by UI Automation.
+function Rects($title) {
+  $r = @{}
+  python "$env:VM\rects.py" $env:VM $title | ForEach-Object { $f = $_.Split('|'); if ($f[0] -eq 'rect') { $r[$f[1]] = @{ x = [int]$f[2]; y = [int]$f[3]; w = [int]$f[4]; h = [int]$f[5]; cx = [int]$f[2] + [int]$f[4] / 2; cy = [int]$f[3] + [int]$f[5] / 2 } } }
+  $r
+}

@@ -9,17 +9,23 @@ on:
     paths: [".github/workflows/winvm.yml", ".github/winvm/**"]
 permissions:
   contents: read
-concurrency:
-  group: winvm
-  cancel-in-progress: true
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      prs: ${{ steps.p.outputs.prs }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: p
+        run: echo "prs=$(cat .github/winvm/run.json)" >> "$GITHUB_OUTPUT"
   check:
+    needs: plan
     name: ${{ matrix.pr }} ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [windows-11-arm, windows-2025]
-        pr: [1232, 1179, 1199, 1209, 1178]
+        pr: ${{ fromJSON(needs.plan.outputs.prs) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
