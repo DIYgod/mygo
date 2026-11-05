@@ -349,6 +349,7 @@ var elementChains = map[string]bool{
 	"TextBackground":       true,
 	"TextCaret":            true,
 	"TextColor":            true,
+	"TextOrientation":      true,
 	"TextRanges":           true,
 	"TextStroke":           true,
 	"Tooltip":              true,
@@ -371,6 +372,7 @@ var elementChains = map[string]bool{
 	"WidthPercent":         true,
 	"Wrap":                 true,
 	"WrapReverse":          true,
+	"WritingMode":          true,
 	"ZIndex":               true,
 }
 
