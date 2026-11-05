@@ -36,11 +36,27 @@ if free:
     for el in all_elements(lst)[1:]:
         print('  ', line(el))
     print('popup still open:', find(root, ct='List', timeout=1) is not None)
-print('== SelectionItem.Select on Team')
+def state():
+    pump(1.5)
+    print('  popup open:', find(root, ct='List', timeout=0) is not None,
+          '| text:', [e.CurrentName for e in all_elements(root) if (e.CurrentName or '').startswith('Plan:')],
+          '| select:', line(find(root, 'Plan')))
+print('== SelectionItem.Select on Team (not highlighted: Free is)')
 team = find(root, 'Team', ct='ListItem', timeout=2)
 if team:
-    select(team); pump(1.0)
-    print('popup open after Select:', find(root, ct='List', timeout=1) is not None)
-    print('text:', [e.CurrentName for e in all_elements(root) if e.CurrentName.startswith('Plan:')])
-    print('select now:', line(find(root, 'Plan')))
+    print('  before:', line(team))
+    select(team); state()
+print('== reopen, arrow to Pro, SelectionItem.Select on the highlighted option')
+sel.SetFocus(); pump(0.5); key(VK_SPACE)
+print('  focused:', line(focused()))
+key(VK_UP)
+cur = focused(); print('  focused:', line(cur))
+if CT.get(cur.CurrentControlType) == 'ListItem':
+    select(cur); state()
+print('== Invoke on the highlighted option')
+if find(root, ct='List', timeout=0) is None:
+    sel.SetFocus(); pump(0.5); key(VK_SPACE); key(VK_DOWN)
+cur = focused(); print('  focused:', line(cur))
+if CT.get(cur.CurrentControlType) == 'ListItem':
+    invoke(cur); state()
 print('focused:', line(focused()))

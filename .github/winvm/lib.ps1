@@ -91,3 +91,14 @@ function UiaDump($el, $depth = 0, $max = 12) {
   $ch = $w.GetFirstChild($el)
   while ($null -ne $ch) { UiaDump $ch ($depth + 1) $max; $ch = $w.GetNextSibling($ch) }
 }
+
+# The Windows 11 runner starts at a privacy settings screen of the
+# out-of-box experience, above every window: close it.
+function Prep {
+  Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { "window: $($_.ProcessName) '$($_.MainWindowTitle)'" }
+  foreach ($n in 'WWAHost', 'CloudExperienceHost', 'CloudExperienceHostBroker', 'UserOOBEBroker') { Get-Process $n -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue }
+  Start-Sleep 2
+  Get-Process | Where-Object { $_.MainWindowTitle } | ForEach-Object { "window after: $($_.ProcessName) '$($_.MainWindowTitle)'" }
+  Shot prep | Out-Null
+}
+Prep

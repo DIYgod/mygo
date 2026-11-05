@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-11-arm, windows-2025]
-        pr: [1232, 1179]
+        pr: [1232, 1179, 1199, 1209, 1178]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:

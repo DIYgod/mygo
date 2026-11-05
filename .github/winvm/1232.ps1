@@ -1,7 +1,8 @@
 . "$env:VM\lib.ps1"
 git clone -q --depth 1 https://github.com/microsoft/Selawik "$env:RUNNER_TEMP\selawik"
-$ttf = Get-ChildItem "$env:RUNNER_TEMP\selawik" -Recurse -Filter selawksl.ttf | Select-Object -First 1
-$dir = $ttf.DirectoryName; "fonts in $dir"; Get-ChildItem $dir -Filter *.ttf | ForEach-Object { $_.Name }
+Get-ChildItem "$env:RUNNER_TEMP\selawik" -Recurse -Include *.ttf | ForEach-Object { $_.FullName }
+$ttf = Get-ChildItem "$env:RUNNER_TEMP\selawik" -Recurse -Include selawksl.ttf | Select-Object -First 1
+$dir = $ttf.DirectoryName; "fonts in $dir"
 BuildCheck font "$env:RUNNER_TEMP\font.exe"
 "== Semilight registered first"; & "$env:RUNNER_TEMP\font.exe" $dir semi
 "== Light registered first"; & "$env:RUNNER_TEMP\font.exe" $dir light
