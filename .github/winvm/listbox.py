@@ -36,27 +36,25 @@ if free:
     for el in all_elements(lst)[1:]:
         print('  ', line(el))
     print('popup still open:', find(root, ct='List', timeout=1) is not None)
-def state():
-    pump(1.5)
-    print('  popup open:', find(root, ct='List', timeout=0) is not None,
-          '| text:', [e.CurrentName for e in all_elements(root) if (e.CurrentName or '').startswith('Plan:')],
-          '| select:', line(find(root, 'Plan')))
-print('== SelectionItem.Select on Team (not highlighted: Free is)')
-team = find(root, 'Team', ct='ListItem', timeout=2)
-if team:
-    print('  before:', line(team))
-    select(team); state()
-print('== reopen, arrow to Pro, SelectionItem.Select on the highlighted option')
-sel.SetFocus(); pump(0.5); key(VK_SPACE)
-print('  focused:', line(focused()))
-key(VK_UP)
-cur = focused(); print('  focused:', line(cur))
-if CT.get(cur.CurrentControlType) == 'ListItem':
-    select(cur); state()
-print('== Invoke on the highlighted option')
-if find(root, ct='List', timeout=0) is None:
-    sel.SetFocus(); pump(0.5); key(VK_SPACE); key(VK_DOWN)
-cur = focused(); print('  focused:', line(cur))
-if CT.get(cur.CurrentControlType) == 'ListItem':
-    invoke(cur); state()
-print('focused:', line(focused()))
+def state(label):
+    pump(2.0)
+    print('  RESULT %s: popup open=%s | %s | select=%s' % (label, find(root, ct='List', timeout=0) is not None,
+          [e.CurrentName for e in all_elements(root) if (e.CurrentName or '').startswith('Plan:')],
+          line(find(root, 'Plan'))))
+def reopen():
+    if find(root, ct='List', timeout=0) is not None:
+        key(VK_ESC)
+    s = find(root, 'Plan'); s.SetFocus(); pump(0.5); key(VK_SPACE); pump(0.5)
+    print('  reopened, highlighted:', line(focused()))
+def opt(name):
+    return find(root, name, ct='ListItem', timeout=2)
+print('== S1: Select on an option not highlighted (Team)')
+reopen(); select(opt('Team')); state('S1 Select Team')
+print('== S2: Select on the highlighted option')
+reopen(); cur = focused(); print('  selecting', cur.CurrentName); select(cur); state('S2 Select highlighted ' + cur.CurrentName)
+print('== S3: Invoke on an option not highlighted (Free)')
+reopen(); invoke(opt('Free')); state('S3 Invoke Free')
+print('== S4: SetFocus on Enterprise, then Enter')
+reopen(); opt('Enterprise').SetFocus(); state('S4a SetFocus Enterprise'); print('  focused:', line(focused())); key(0x0D); state('S4b Enter')
+print('== S5: Select on Pro after arrows')
+reopen(); key(VK_UP); key(VK_UP); print('  focused:', line(focused())); select(opt('Pro')); state('S5 Select Pro')
