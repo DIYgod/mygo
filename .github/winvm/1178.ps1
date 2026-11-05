@@ -84,4 +84,4 @@ Round notransparency-light light
 Set-ItemProperty $pers EnableTransparency 1
 "== tests"
 go test ./internal/windows/... 2>&1 | Select-Object -Last 15
-$env:MYGO_E2E = 1; go test ./internal/e2e -run 'TestNativeMenuShortcuts|TestPageMenuPaste|TestMenuIconsWindows' -v 2>&1 | Select-String -Pattern '^(=== RUN|--- |ok|FAIL|PASS|\s+\S+_test.go)' | Select-Object -Last 40
+$env:MYGO_E2E = 1; go test ./internal/e2e -run 'TestNativeMenuShortcuts|TestPageMenuPaste|TestMenuIconsWindows|TestPageMenuKeepsOpenOnAlt|TestMenuBarClosesOnAlt' -count=3 -v 2>&1 | Select-String -Pattern '^(=== RUN|--- |ok|FAIL|PASS|\s+\S+_test.go)' | Select-Object -Last 40
