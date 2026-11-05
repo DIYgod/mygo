@@ -1,5 +1,8 @@
 . "$env:VM\lib.ps1"
-git clone -q --depth 1 https://github.com/microsoft/Selawik "$env:RUNNER_TEMP\selawik"
+$sd = "$env:RUNNER_TEMP\selawik"; New-Item -ItemType Directory -Force $sd | Out-Null
+gh release list --repo microsoft/Selawik --limit 5
+gh release download --repo microsoft/Selawik -D $sd --skip-existing
+Get-ChildItem $sd -Filter *.zip | ForEach-Object { Expand-Archive $_.FullName -DestinationPath "$sd\$($_.BaseName)" -Force }
 Get-ChildItem "$env:RUNNER_TEMP\selawik" -Recurse -Include *.ttf | ForEach-Object { $_.FullName }
 $ttf = Get-ChildItem "$env:RUNNER_TEMP\selawik" -Recurse -Include selawksl.ttf | Select-Object -First 1
 $dir = $ttf.DirectoryName; "fonts in $dir"

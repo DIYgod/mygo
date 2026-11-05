@@ -43,6 +43,7 @@ jobs:
         env:
           OUT: ${{ runner.temp }}\out
           VM: ${{ github.workspace }}\vm\.github\winvm
+          GH_TOKEN: ${{ github.token }}
         run: |
           New-Item -ItemType Directory -Force $env:OUT | Out-Null
           git log -1 --format='%H %s' | Tee-Object "$env:OUT\head.txt"
