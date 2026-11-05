@@ -61,12 +61,14 @@ func TestWritingMode(t *testing.T) {
 }
 
 // TestVerticalGlyphs checks how vertical text paints: each column turned
-// a quarter clockwise, its kana turned back to stand up, its Latin left
-// turned with it, as text-orientation: mixed sets them.
+// a quarter clockwise, what stands up in it (UAX #50's U, as kana, han and
+// ©) turned back, its Latin left turned with it, as text-orientation:
+// mixed sets them. It sets ©, which every system's Latin fonts have, as
+// not every test machine has a font for han.
 func TestVerticalGlyphs(t *testing.T) {
 	black := RGB(0, 0, 0)
 	tt := coreNewTester(func(c *context) {
-		coreText(c, "漢A").FontSize(20).TextColor(black).WritingMode(VerticalRL)
+		coreText(c, "©A").FontSize(20).TextColor(black).WritingMode(VerticalRL)
 	}, 200, 200)
 	var up, side int
 	for _, op := range tt.h.last.Ops {
