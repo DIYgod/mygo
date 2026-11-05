@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-11-arm, windows-2025]
-        pr: [1232]
+        pr: [1232, 1179]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -29,8 +29,10 @@ jobs:
         with: { path: pr, ref: "refs/pull/${{ matrix.pr }}/head" }
       - uses: actions/setup-go@v5
         with: { go-version-file: pr/go.mod, cache-dependency-path: pr/go.sum }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
       - name: check
-        shell: powershell
+        shell: pwsh
         working-directory: pr
         env:
           OUT: ${{ runner.temp }}\out

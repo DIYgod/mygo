@@ -1,3 +1,4 @@
+$ErrorActionPreference = 'Continue'
 # Helpers the checks share: screenshots, input, UI Automation.
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
