@@ -1,0 +1,40 @@
+# Temporary: regenerates the compiled Metal and Direct3D shaders of the
+# branch named in .github/shadergen-ref on macOS and Windows runners, and
+# uploads them as artifacts, for PRs whose shaders change.
+name: shadergen
+on:
+  push:
+    branches: [claude/shadergen]
+permissions:
+  contents: read
+jobs:
+  gen:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, pkg: metal, file: shaderlib.go }
+          - { os: windows-latest, pkg: d3d11, file: shaders.go }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: gen }
+      - id: ref
+        shell: bash
+        run: echo "ref=$(cat gen/.github/shadergen-ref)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with: { path: src, ref: "${{ steps.ref.outputs.ref }}" }
+      - uses: actions/setup-go@v5
+        with: { go-version-file: src/go.mod, cache-dependency-path: src/go.sum }
+      - name: generate
+        shell: bash
+        working-directory: src
+        run: |
+          git log -1 --format='%H %s'
+          go generate ./internal/gpu/${{ matrix.pkg }}
+          git diff --stat
+          go test ./internal/gpu/${{ matrix.pkg }} -run 'TestShader'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.pkg }}
+          path: src/internal/gpu/${{ matrix.pkg }}/${{ matrix.file }}
