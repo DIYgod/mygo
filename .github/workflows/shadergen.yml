@@ -34,9 +34,9 @@ jobs:
           go generate ${{ matrix.pkgs }}
           git diff --stat
           go test ${{ matrix.pkgs }} -run 'TestShader|TestBytecode|TestLibrary'
-          mkdir -p "$RUNNER_TEMP/out"
-          git diff --name-only | tar -cf "$RUNNER_TEMP/out/gen.tar" -T -
+          mkdir -p ../out
+          git diff --name-only | xargs -I{} cp --parents {} ../out/
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: ${{ runner.temp }}/out
+          path: out
