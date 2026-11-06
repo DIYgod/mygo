@@ -13,8 +13,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, pkg: metal, file: shaderlib.go }
-          - { os: windows-latest, pkg: d3d11, file: shaders.go }
+          - { os: macos-latest, name: metal, pkgs: "./internal/gpu/metal ./plugins/glass" }
+          - { os: windows-latest, name: d3d11, pkgs: "./internal/gpu/d3d11 ./plugins/glass" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -31,10 +31,12 @@ jobs:
         working-directory: src
         run: |
           git log -1 --format='%H %s'
-          go generate ./internal/gpu/${{ matrix.pkg }}
+          go generate ${{ matrix.pkgs }}
           git diff --stat
-          go test ./internal/gpu/${{ matrix.pkg }} -run 'TestShader'
+          go test ${{ matrix.pkgs }} -run 'TestShader|TestBytecode|TestLibrary'
+          mkdir -p "$RUNNER_TEMP/out"
+          git diff --name-only | tar -cf "$RUNNER_TEMP/out/gen.tar" -T -
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.pkg }}
-          path: src/internal/gpu/${{ matrix.pkg }}/${{ matrix.file }}
+          name: ${{ matrix.name }}
+          path: ${{ runner.temp }}/out
