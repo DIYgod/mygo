@@ -33,9 +33,9 @@ jobs:
           git log -1 --format='%H %s'
           go generate ${{ matrix.pkgs }}
           git diff --stat
-          go test ${{ matrix.pkgs }} -run 'TestShader|TestBytecode|TestLibrary'
+          go test ${{ matrix.pkgs }} -run 'Shader|Bytecode|Library'
           mkdir -p ../out
-          git diff --name-only | xargs -I{} cp --parents {} ../out/
+          git diff --name-only | while read -r f; do mkdir -p "../out/$(dirname "$f")"; cp "$f" "../out/$f"; done
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
