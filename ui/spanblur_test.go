@@ -190,8 +190,10 @@ func TestSpanBlurBackgroundAndLines(t *testing.T) {
 			t.Errorf("a blurred span fills %v sharp", op.Color)
 		}
 	}
-	if backgrounds != 1 || lines != 2 {
-		t.Errorf("%d blurred backgrounds, %d blurred lines; want 1, 2", backgrounds, lines)
+	// The underline and the strikethrough: Core Text's underline skips the
+	// ink of descenders, the y's here, in more than one stroke.
+	if backgrounds != 1 || lines < 2 {
+		t.Errorf("%d blurred backgrounds, %d blurred lines; want 1, at least 2", backgrounds, lines)
 	}
 }
 
