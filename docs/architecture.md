@@ -5225,9 +5225,13 @@ interfaces Swift implements. Three parts make it work:
   `Diag` at its line, with what to write instead. An interface the module
   returns is the platform's, one it only takes is Go's (`ByGo`). It writes
   `<package>_native.go` (constructors and proxies, `gogen.go`) and
-  `<Module>.mygo.swift` (protocols, structs with explicit `Codable`, enums,
-  `<Module>Error`, the `@_cdecl` entry points and the glue in
-  `support.go`). Both carry `mygo:native <version> <hash>`, the hash of the
+  `<Module>.mygo.swift` (protocols, structs, enums, `<Module>Error`, the
+  `@_cdecl` entry points and the glue in `support.go`), and on both sides
+  the functions that encode the composite types the methods cross
+  (`wire.go`: `_enc_<T>`/`_dec_<T>` in Go, `_mygoWrite_<T>`/`_mygoRead_<T>`
+  in Swift, `<T>` named after the type, as `slice_map_int`, and a type of
+  another module, whose struct fields name its types relative to it, as
+  `<Module>_<T>`). Both carry `mygo:native <version> <hash>`, the hash of the
   package's type, const and error declarations with their comments, which
   `mygo build` compares (`Stale`). The generated Go names its own
   identifiers with a leading underscore (`_x`, `_ctx`, `_err`, `_r`, `_h`,
@@ -5242,15 +5246,27 @@ interfaces Swift implements. Three parts make it work:
   them forgotten if it does not start (`native.Stream`'s `prepare`). The
   scaffolds of `mygo native new` and `add` are in `write.go`.
 - **`native`** is the runtime the generated Go calls, imported only by
-  modules, so apps without one link none of it. On macOS it `dlopen`s
-  `lib<Module>.dylib`: from the bundle's `Contents/Frameworks`, then
-  `MYGO_NATIVE_PATH`, then `<package dir>/apple/.build/mygo`, which
-  `runtime.Caller` of the generated file finds in builds without
-  `-trimpath` (go test, go run), checked against the Swift sources' times.
+  modules, so apps without one link none of it. It loads
+  `lib<Module>.dylib` as package `ffi` loads any library (`ffi.New(name,
+  nil).From(dir)`: `MYGO_NATIVE_<NAME>`, the bundle's
+  `Contents/Frameworks`, next to the executable, then `.mygo/native` of
+  the module of the package's directory, which `runtime.Caller` of the
+  generated file finds in builds without `-trimpath`, go test and go run,
+  checked against the Swift sources' times); on Linux the same, for go
+  test (`lib_linux.go`), packaged apps saying `ErrUnsupported`.
   Every entry point has one C signature, `(obj, args, len, call) ->
-  block`: arguments go as a JSON array, results come back in a block
-  `malloc`ed by the side that made it (status, length, bytes) and freed by
-  the other. One purego callback, created once for all modules, carries
+  block`: arguments go in the binary encoding (`codec.go`: integers as 8
+  bytes little-endian, floats as float64, lengths before bytes and
+  elements, a flag before a pointer's value, structs as their fields in
+  order, an empty one as a zero byte so that every element takes one and
+  a length is never more than the bytes left), from a pooled `Encoder`;
+  results come back in a block `malloc`ed by the side that made it
+  (status, length, bytes) and freed by the other, which Go's `Decoder`
+  reads in place and frees on `Close`. Errors cross as a kind, code,
+  domain, number and message, both ways. A method of numbers and bools
+  that returns no error (`direct`) has a `_direct` entry point instead,
+  `(obj, a0, a1 …) -> UInt64`, called with them as registers: integers as
+  their bits, floats as a float64's, bools as 0 or 1. One purego callback, created once for all modules, carries
   everything the platform tells Go (`kind*` in `call.go`): results of
   asynchronous calls and values of streams, by call id; notifications and
   questions of callbacks, by the handle of a Go function; calls of methods
@@ -5330,18 +5346,21 @@ interfaces Swift implements. Three parts make it work:
   gives none, as the CPU renderer does, into a texture of their own: the
   Metal renderer marks the textures a source gave (`texture.gpu`) and
   never uploads pixels into one.
-- **Prebuilt implementations** (`native_prebuild.go`): a universal
-  release build packed as `.tar.gz`, named after its SHA-256
-  (`prebuiltName`) and uploaded with `gh` to the one release
-  `native-modules` (`uploadPrebuilt`, which never replaces a file: a name
-  there already is the same bytes), recorded under `native.apple` of the
-  module's `mygo-plugin.json` with the hash of its Swift package's
-  sources, LF line endings, and those of the modules it uses
-  (`moduleSourceHash`); `prebuild` skips a module whose record matches,
-  unless `-force`. `moduleBuild` takes it while the hash matches, in
-  release builds and wherever Swift is missing, through the cache of
-  native libraries (`fetchNative`), unpacked with no path or link that
-  leads out of its directory (`untar`).
+- **Published implementations** (`native_swift.go`, `publishSwift` in
+  `native_lib.go`): a module is a native library of its own, named as its
+  Swift module and built with swift from `./apple` (`moduleLibrary`), so
+  `mygo native build` publishes it as Rust and Zig libraries: a universal
+  release build packed as `.tar.gz` with its frameworks, named after its
+  SHA-256, uploaded with `gh` to the release `native-libraries` of the
+  checkout's repository unless `-release` or the library names another
+  (`uploadNatives`, which never replaces a file: a name there already is
+  the same bytes), recorded under `darwin-universal` of the module's
+  `mygo-plugin.json` with the hash of its Swift package's sources, LF line
+  endings, and those of the modules it uses (`moduleSourceHash`); it skips
+  a module whose record matches, unless `-force`. `swiftBuild` takes it
+  while the hash matches, in release builds and wherever Swift is missing,
+  through the cache of native libraries (`fetchNative`), unpacked with no
+  path or link that leads out of its directory (`untar`).
 
 ## CLI (`cmd/mygo`)
 

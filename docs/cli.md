@@ -209,19 +209,21 @@ mygo native build [flags] [dir]
 ```
 
 Builds the [native libraries](native-libraries.md) that the packages in
-`dir` name in their `mygo-plugin.json` from their sources, with cargo or
-zig, for every platform, writes the files to publish into
+`dir` name in their `mygo-plugin.json`, and the implementations of the
+[native modules](native-modules.md) in `dir`, from their sources, with
+cargo, zig or swift, for every platform, writes the files to publish into
 `.mygo/native/release` of the module, named after their SHA-256, and
-their names, URLs and SHA-256 into `mygo-plugin.json`. Platforms that do
-not build here (Rust's macOS libraries off a Mac) are listed at the end and
-left as they were. Flags go before the directory. `mygo dev` and `mygo build` build the libraries
+their names, URLs and SHA-256 into `mygo-plugin.json`. Swift libraries
+build on a Mac, universal, as a `.tar.gz` with the frameworks they bring
+(`darwin-universal`). Platforms that do not build here (Rust's and Swift's
+macOS libraries off a Mac) are listed at the end and left as they were. Flags go before the directory. `mygo dev` and `mygo build` build the libraries
 of the app's own packages themselves; this publishes those of a package
 for the apps of others, which then need neither Rust nor Zig.
 
 | Flag | |
 |---|---|
 | `-target` | the platforms, `GOOS-GOARCH` separated by commas, `all` (the default) or `host`, which builds this machine's library for `go run` and `go test` and leaves `mygo-plugin.json` alone |
-| `-release` | the URL of the directory the files are published in, as `https://github.com/<owner>/<repo>/releases/download/<tag>` (default: the library's `release`) |
+| `-release` | the URL of the directory the files are published in, as `https://github.com/<owner>/<repo>/releases/download/<tag>` (default: the library's `release`, else with `-upload` the release `native-libraries` of the repository of the git checkout) |
 | `-out` | the directory of the files to publish |
 | `-upload` | uploads the files to the GitHub release of `-release` with the GitHub CLI, creating it if needed |
 | `-force` | builds the platforms whose published files were built from the sources as they are too, which it otherwise skips |
@@ -269,21 +271,6 @@ Makes the implementation of an entry point, calls one method with
 prints the result as JSON, a line per value of a stream. It makes the
 method's context, which `-timeout` limits, and prints the calls of
 callbacks.
-
-### mygo native prebuild
-
-```
-mygo native prebuild [-repo owner/name] [-tag name] [-force] [-no-upload] [module dir]
-```
-
-Builds the module's implementations, uploads them as assets of the release
-`native-modules` (or `-tag`) of the app's repository (the GitHub repository
-of the module's git checkout, or `-repo`, with the GitHub CLI) and records
-them in the module's `mygo-plugin.json`, so machines without the platforms'
-tools build the app with them while they match the sources. Files are
-named after their SHA-256 and never replaced. A module whose recorded build
-matches its sources is left alone unless `-force`. `-no-upload` only
-builds the archive, into `apple/.build/mygo`.
 
 `mygo generate` generates every native module of the app, and `mygo dev`
 and `mygo build` build them; see

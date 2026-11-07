@@ -128,6 +128,30 @@ The CLI removes debug information from the Linux libraries it builds, as
 `build.zig` asks to strip: libghostty-vt would be 10 MB instead of 2.4 MB.
 Exported functions stay, so `ffi` still finds them.
 
+## A Swift package
+
+On macOS, `"build": {"swift": "./swift"}` names the directory of a Swift
+package whose product, named as the library, is a dynamic library, with
+its functions exported for C by `@_cdecl`:
+
+```swift
+// greet/swift/Sources/Greet/Greet.swift
+import Foundation
+
+@_cdecl("greet_add")
+public func add(_ a: Int64, _ b: Int64) -> Int64 { a + b }
+```
+
+The CLI runs `swift build -c release --product <name> --arch arm64 --arch
+x86_64`, so a Swift library builds on a Mac, with
+Xcode or its Command Line Tools, and is published as one universal file
+(`darwin-universal`): a `.tar.gz` of the library and the frameworks it
+brings, which apps put into their `Frameworks`. On Linux, `-target host`
+builds one for `go run` and `go test` when the package uses only
+Foundation. A [native module](native-modules.md) is such a library whose
+bindings `mygo generate` writes on both sides, so that its Swift
+implements a Go interface instead.
+
 ## Binding functions
 
 `Library.Bind` takes a pointer to a struct of functions, which it binds the
@@ -359,10 +383,11 @@ it out for a library you publish by other means.
 |---|---|
 | `cargo` | the directory of a Rust crate (its `Cargo.toml`), as `"./rust"`, whose `crate-type` includes `"cdylib"` |
 | `zig` | the directory of a Zig package (its `build.zig`), as `"./zig"`, which installs a dynamic library |
-| `args` | more arguments of `cargo build` or `zig build`; one naming a profile (`--profile`) or an optimize mode (`-Doptimize=…`) replaces the release one |
+| `swift` | the directory of a Swift package (its `Package.swift`), as `"./swift"`, whose product named as the library is a dynamic library; it builds on macOS |
+| `args` | more arguments of `cargo build`, `zig build` or `swift build`; one naming a profile (`--profile`) or an optimize mode (`-Doptimize=…`) replaces the release one |
 | `macOS` | the oldest macOS the library runs on, when it needs a later one than the app's minimum or 12.0 |
 
-Name exactly one of `cargo` and `zig`. The directory must be inside the
+Name exactly one of `cargo`, `zig` and `swift`. The directory must be inside the
 package. When the package is the app's own, or in a module the app
 replaces with a directory, `mygo dev` and `mygo build` build the library
 for each target, unless a published file was built from the sources as
@@ -380,7 +405,9 @@ each file has its full `url`.
 ### files
 
 The published builds, by `GOOS-GOARCH` (`darwin-arm64`, `linux-amd64`,
-`windows-arm64` …), which apps get when they do not build the library:
+`windows-arm64` …), or `darwin-universal` for one file of both macOS
+architectures, as Swift libraries are, which apps get when they do not
+build the library:
 
 | Field | |
 |---|---|

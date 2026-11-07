@@ -808,42 +808,48 @@ implementation of every module in release mode, universal for arm64 and
 x86_64, and signs it with the frameworks it brings, before it signs and
 notarizes the app ([distribution](distribution.md)).
 
-To build an app on a machine without the platform's tools, such as a Linux
-runner of GitHub Actions, prebuild the modules where the tools are:
+A module's implementation is a [native library](native-libraries.md),
+built and published as Rust and Zig ones are. To build an app on a machine
+without the platform's tools, such as a Linux runner of GitHub Actions,
+publish the module's builds from a Mac:
 
 ```sh
-mygo native prebuild [-repo owner/name] [-tag name] [-force] [-no-upload] [module dir]
+mygo native build -upload [module dir]
 ```
 
-builds the module's implementations, uploads them as release assets of the
-app's repository and records them in `mygo-plugin.json` next to the
-module, as the [terminal](plugins/terminal.md) plugin ships libghostty-vt:
-every machine then downloads those builds instead of compiling them, and
-they must change with the sources, which `mygo build` checks. It uploads
-with the [GitHub CLI](https://cli.github.com), to the release
-`native-modules` (or `-tag`) of the repository of the module's git
-checkout, or of `-repo`, which it creates once, not as the latest release;
-every module's builds go there. Each file is named after its SHA-256 and
-never replaced, so the builds that older commits record stay
-downloadable. `-no-upload` only builds the archive. Commit
-`mygo-plugin.json`.
+builds the implementation, universal, into a `.tar.gz` with the frameworks
+it brings, uploads it as a release asset of the app's repository and
+records it in `mygo-plugin.json` next to the module, under
+`darwin-universal`, as the [terminal](plugins/terminal.md) plugin ships
+libghostty-vt: every machine then downloads that build instead of compiling
+it, while it matches the sources. It uploads with the
+[GitHub CLI](https://cli.github.com) to the release `native-libraries` of
+the repository of the module's git checkout, which it creates once, not as
+the latest release, or to the `-release` URL; every library's builds go
+there. Each file is named after its SHA-256 and never replaced, so the
+builds that older commits record stay downloadable. Without `-upload`, it
+only builds the archive. Commit `mygo-plugin.json`.
 
 The hash it records covers the Swift package's sources, with line endings
 as LF so that checkouts on every platform agree, and those of the native
 modules the module uses. A module whose recorded build matches them is
-left alone, so prebuilding on every push, in a macOS job of CI, uploads
-only what changed; `-force` builds it again. Prebuild each module the app
+left alone, so publishing on every push, in a macOS job of CI, uploads
+only what changed; `-force` builds it again. Publish each module the app
 uses: a module's archive holds its own library, not those of the modules
 it uses.
 
-`mygo build` takes the prebuilt implementation while its hash is the
+`mygo build` takes the published implementation while its hash is the
 sources', and `mygo dev` where Swift is missing; once the sources change,
 a machine with Swift builds them, with a warning, and one without stops
-and says to prebuild again.
+and says to publish them again.
 
 `go test` runs the implementation of the platform it runs on once
-`mygo generate` has built it; it says to run it when the build is missing
-or older than the sources. Code that takes the interface, rather than the
+`mygo generate`, or `mygo native build -target host`, has built it; it says
+to run it when the build is missing or older than the sources. On Linux,
+the same commands build the Swift of a module that uses only Foundation
+with a [Swift toolchain](https://www.swift.org/install/linux/), as the
+images of GitHub's Ubuntu runners have, so its tests run in a Linux job
+too; apps run native modules on macOS only. Code that takes the interface, rather than the
 constructor's result, is tested anywhere with a fake of it:
 
 ```go
@@ -910,12 +916,21 @@ mygo.Bind(&Text{a}) // a service whose methods call a
 
 ## How it works
 
-The generated Go calls the implementation's library through purego, with
-no cgo, as MyGo calls the system: one C entry point per method, which the
-generated Swift exports with `@_cdecl`, and one Go callback shared by every
-module, for results of asynchronous methods, the values of streams,
-callbacks, and calls into interfaces Go implements. Values cross as JSON,
-the encoding of [bound services](bindings.md), except numbers and `[]byte`,
-which cross as they are, buffers, which are memory both sides map, and
-textures, which are `IOSurface`s shared with the GPU. An app that has no
+The generated Go calls the implementation's library, which package `ffi`
+finds and loads as any [native library](native-libraries.md), through
+purego, with no cgo, as MyGo calls the system: one C entry point per
+method, which the generated Swift exports with `@_cdecl`, and one Go
+callback shared by every module, for results of asynchronous methods, the
+values of streams, callbacks, and calls into interfaces Go implements.
+
+Values cross in a binary encoding that both sides' generated code writes
+and reads in the order of the declarations, with no reflection and no
+field names: integers as 8 bytes, floats as float64, strings and `[]byte`
+as their length then their bytes, slices and maps as their length then
+their elements, pointers as a flag then the value, structs as their
+fields, enums as their values, times as Unix seconds and nanoseconds.
+Results are read in place from the memory the implementation returns them
+in. A method of numbers and bools only, which returns no error, skips even
+that: Go calls its C function with them as registers. Buffers are memory
+both sides map, and textures `IOSurface`s shared with the GPU. An app that has no
 native module links none of this.
