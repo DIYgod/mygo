@@ -13,7 +13,7 @@ import (
 
 // Version changes when the generated code changes for the same interface,
 // so that `mygo build` regenerates what an older generator wrote.
-const Version = "1"
+const Version = "2"
 
 // Module is the Go package of a native module.
 type Module struct {

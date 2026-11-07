@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
@@ -36,6 +35,14 @@ const (
 type reply struct {
 	status int64
 	data   []byte
+	// block is the platform's memory data is in, freed with free.
+	block uintptr
+}
+
+func (r reply) free() {
+	if r.block != 0 {
+		freeBlock(r.block)
+	}
 }
 
 // pending holds the calls and streams waiting for the platform.
@@ -64,69 +71,89 @@ func onMain(flags Flags, fn func()) error {
 	return errNotMain
 }
 
-// call calls a function of the implementation that returns at once.
-func (m *Module) call(ctx context.Context, h uint64, sym string, flags Flags, args []any, result any) error {
+// call calls a function of the implementation that returns at once, with
+// the arguments args, which it releases.
+func (m *Module) call(ctx context.Context, h uint64, sym string, flags Flags, args *Encoder) (*Decoder, error) {
 	lib, err := m.load()
 	if err != nil {
-		return err
-	}
-	in, err := encodeArgs(args)
-	if err != nil {
-		return fmt.Errorf("native: %s: %w", sym, err)
+		args.release()
+		return nil, err
 	}
 	var r reply
-	if err := onMain(flags, func() { r = lib.invoke(m, sym, h, in, 0) }); err != nil {
-		return err
+	if flags&MainThread == 0 {
+		r = lib.invoke(m, sym, h, args.bytes(), 0)
+	} else {
+		err = onMain(flags, func() { r = lib.invoke(m, sym, h, args.bytes(), 0) })
 	}
-	return m.result(ctx, sym, r, result)
+	args.release()
+	if err != nil {
+		return nil, err
+	}
+	return m.result(ctx, sym, r)
 }
 
-func (m *Module) result(ctx context.Context, sym string, r reply, result any) error {
+// callNone calls a function that returns nothing.
+func (m *Module) callNone(h uint64, sym string, flags Flags) error {
+	d, err := m.call(context.Background(), h, sym, flags, nil)
+	if err != nil {
+		return err
+	}
+	return d.Close()
+}
+
+// direct calls the C function of a method of numbers.
+func (m *Module) direct(h uint64, sym string, args []uintptr) uintptr {
+	lib, err := m.load()
+	if err != nil {
+		return 0
+	}
+	fn, err := lib.sym(m, sym)
+	if err != nil {
+		return 0
+	}
+	return lib.direct(fn, h, args)
+}
+
+func (m *Module) result(ctx context.Context, sym string, r reply) (*Decoder, error) {
 	switch r.status {
 	case statusOK:
-		if result == nil || len(r.data) == 0 {
-			return nil
-		}
-		if err := json.Unmarshal(r.data, result); err != nil {
-			return fmt.Errorf("native: %s returned %s: %w", sym, r.data, err)
-		}
-		return nil
+		return newDecoder(r.data, r.block), nil
 	case statusError:
-		return m.decodeError(ctx, r.data)
+		err := m.decodeError(ctx, r.data)
+		r.free()
+		return nil, err
 	}
-	return fmt.Errorf("native: %s answered with status %d", sym, r.status)
+	r.free()
+	return nil, fmt.Errorf("native: %s answered with status %d", sym, r.status)
 }
 
 // callAsync calls an asynchronous function of the implementation: it
 // starts a task, which ctx cancels, and reports through the callback.
-func (m *Module) callAsync(ctx context.Context, h uint64, sym string, flags Flags, args []any, result any) error {
+// Main-thread methods start their task from any thread: it runs on the
+// main actor.
+func (m *Module) callAsync(ctx context.Context, h uint64, sym string, args *Encoder) (*Decoder, error) {
 	lib, err := m.load()
 	if err != nil {
-		return err
-	}
-	in, err := encodeArgs(args)
-	if err != nil {
-		return fmt.Errorf("native: %s: %w", sym, err)
+		args.release()
+		return nil, err
 	}
 	id := nextID.Add(1)
 	ch := make(chan reply, 1)
 	pending.Store(id, ch)
 	defer pending.Delete(id)
-	var r reply
-	// Main-thread methods start their task from any thread: it runs on
-	// the main actor.
-	r = lib.invoke(m, sym, h, in, id)
+	r := lib.invoke(m, sym, h, args.bytes(), id)
+	args.release()
 	if r.status != statusPending {
-		return m.result(ctx, sym, r, result)
+		return m.result(ctx, sym, r)
 	}
-	_ = flags
+	r.free()
 	select {
 	case r = <-ch:
 	case <-ctx.Done():
 		lib.cancel(m, id)
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
-	return m.result(ctx, sym, r, result)
+	return m.result(ctx, sym, r)
 }
 
 type stream struct {
@@ -137,29 +164,31 @@ type stream struct {
 	ch  chan reply
 }
 
-func (m *Module) startStream(h uint64, sym string, flags Flags, args []any) (*stream, error) {
+func (m *Module) startStream(h uint64, sym string, flags Flags, args *Encoder) (*stream, error) {
 	lib, err := m.load()
 	if err != nil {
+		args.release()
 		return nil, err
-	}
-	in, err := encodeArgs(args)
-	if err != nil {
-		return nil, fmt.Errorf("native: %s: %w", sym, err)
 	}
 	s := &stream{m: m, lib: lib, sym: sym, id: nextID.Add(1), ch: make(chan reply, 1)}
 	pending.Store(s.id, s.ch)
 	var r reply
-	if err := onMain(flags, func() { r = lib.invoke(m, sym, h, in, s.id) }); err != nil {
+	err = onMain(flags, func() { r = lib.invoke(m, sym, h, args.bytes(), s.id) })
+	args.release()
+	if err != nil {
 		pending.Delete(s.id)
 		return nil, err
 	}
 	if r.status != statusPending {
 		pending.Delete(s.id)
-		if err := m.result(context.Background(), sym, r, nil); err != nil {
+		d, err := m.result(context.Background(), sym, r)
+		if err != nil {
 			return nil, err
 		}
+		d.Close()
 		return nil, fmt.Errorf("native: %s did not start its stream", sym)
 	}
+	r.free()
 	return s, nil
 }
 
@@ -246,21 +275,14 @@ func moduleOf(cont uint64) *Module {
 	return m.(*Module)
 }
 
-// invokeEnvelope is what the platform sends to call a method of an
-// object Go implements.
-type invokeEnvelope struct {
-	Method int  `json:"m"`
-	Args   Args `json:"a"`
-}
-
-// handle answers the platform; the block it returns, if any, is the answer
-// of a question.
-func handle(kind, id uint64, status int64, data []byte) (int64, []byte, bool) {
+// handle answers the platform; the encoder it returns, if any, holds the
+// answer of a question.
+func handle(kind, id uint64, status int64, data []byte) (int64, *Encoder, bool) {
 	switch kind {
 	case kindResult, kindItem:
 		if ch, ok := pending.Load(id); ok {
 			select {
-			case ch.(chan reply) <- reply{status, data}:
+			case ch.(chan reply) <- reply{status: status, data: data}:
 			default:
 			}
 		}
@@ -269,57 +291,53 @@ func handle(kind, id uint64, status int64, data []byte) (int64, []byte, bool) {
 		if v == nil || v.dead.Load() {
 			return 0, nil, false
 		}
-		var args Args
-		_ = json.Unmarshal(data, &args)
+		d := &Decoder{b: data}
 		notify(func() {
 			if !v.dead.Load() {
-				_, _ = v.fn(args)
+				_ = v.fn(d, nil)
 			}
 		})
 	case kindAsk:
 		v := lookupGo(id)
 		if v == nil || v.dead.Load() {
-			return statusError, encodeError(ErrClosed), true
+			return answer(nil, ErrClosed)
 		}
-		var args Args
-		_ = json.Unmarshal(data, &args)
-		return answer(v.fn(args))
+		e := NewEncoder()
+		return answer(e, v.fn(&Decoder{b: data}, e))
 	case kindRelease:
 		goValues.Delete(id)
 	case kindInvoke:
 		v := lookupGo(id)
 		if v == nil {
-			return statusError, encodeError(ErrClosed), true
+			return answer(nil, ErrClosed)
 		}
-		var env invokeEnvelope
-		if err := json.Unmarshal(data, &env); err != nil {
-			return statusError, encodeError(err), true
-		}
-		return answer(v.dispatch(context.Background(), env.Method, env.Args))
+		d := &Decoder{b: data}
+		method := int(d.Int())
+		e := NewEncoder()
+		return answer(e, v.dispatch(context.Background(), method, d, e))
 	case kindInvokeAsync:
 		// status is the continuation, which waits for an answer even
 		// when there is no method to call.
 		cont := uint64(status)
 		m := moduleOf(cont)
 		v := lookupGo(id)
-		var env invokeEnvelope
-		err := json.Unmarshal(data, &env)
 		if v == nil {
-			err = ErrClosed
-		}
-		if err != nil {
 			if m != nil {
-				go resume(m, cont, statusError, encodeError(err))
+				go resume(m, cont, statusError, errorBlock(ErrClosed))
 			}
 			return 0, nil, false
 		}
+		d := &Decoder{b: data}
+		method := int(d.Int())
 		ctx, cancel := context.WithCancel(context.Background())
 		asyncs.Store(cont, cancel)
 		go func() {
 			defer cancel()
-			st, out, _ := answer(v.dispatch(ctx, env.Method, env.Args))
+			e := NewEncoder()
+			st, out, _ := answer(e, v.dispatch(ctx, method, d, e))
 			asyncs.Delete(cont)
-			resume(v.m, cont, st, out)
+			resume(v.m, cont, st, out.b)
+			out.release()
 		}()
 	case kindPresent:
 		// The surface comes retained, for the texture to keep.
@@ -343,18 +361,17 @@ func resume(m *Module, cont uint64, status int64, data []byte) {
 	}
 }
 
-func answer(v any, err error) (int64, []byte, bool) {
+// answer is the answer of a question: what e holds, or err.
+func answer(e *Encoder, err error) (int64, *Encoder, bool) {
 	if err != nil {
-		return statusError, encodeError(err), true
+		if e == nil {
+			e = NewEncoder()
+		}
+		e.b = e.b[:0]
+		encodeError(e, err)
+		return statusError, e, true
 	}
-	if v == nil {
-		return statusOK, nil, true
-	}
-	data, err := json.Marshal(v)
-	if err != nil {
-		return statusError, encodeError(err), true
-	}
-	return statusOK, data, true
+	return statusOK, e, true
 }
 
 // Flush waits until the notifications of callbacks the platform has made

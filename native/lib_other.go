@@ -13,8 +13,14 @@ func (m *Module) load() (*library, error) { return nil, errors.ErrUnsupported }
 func isMainThread() bool { return false }
 
 func (l *library) invoke(m *Module, name string, h uint64, args []byte, call uint64) reply {
-	return reply{statusError, encodeError(errors.ErrUnsupported)}
+	return reply{status: statusError, data: errorBlock(errors.ErrUnsupported)}
 }
+
+func (l *library) sym(m *Module, name string) (uintptr, error) { return 0, errors.ErrUnsupported }
+
+func (l *library) direct(fn uintptr, h uint64, args []uintptr) uintptr { return 0 }
+
+func freeBlock(uintptr) {}
 
 func (l *library) release(m *Module, h uint64)                              {}
 func (l *library) cancel(m *Module, call uint64)                            {}

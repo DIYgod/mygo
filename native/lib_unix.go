@@ -30,8 +30,7 @@ var lastModule atomic.Uint64
 // found and loaded as package ffi finds and loads any (see ffi.Library.Path).
 type library struct {
 	lib  *ffi.Library
-	mu   sync.Mutex
-	syms map[string]uintptr
+	syms sync.Map // name → uintptr
 }
 
 var libc struct {
@@ -67,7 +66,9 @@ func loadLibc() error {
 			if !ok {
 				return 0
 			}
-			return newBlock(st, out)
+			p := newBlock(st, out.bytes())
+			out.release()
+			return p
 		})
 	})
 	return libc.err
@@ -94,19 +95,17 @@ func newBlock(status int64, data []byte) uintptr {
 	return p
 }
 
-// readBlock reads and frees a block the platform made.
+// readBlock reads a block the platform made, which the reply frees.
 func readBlock(p uintptr) reply {
 	if p == 0 {
 		return reply{}
 	}
 	head := unsafe.Slice(bytesAt(p), 16)
-	r := reply{status: int64(binary.LittleEndian.Uint64(head))}
-	if n := binary.LittleEndian.Uint64(head[8:]); n > 0 {
-		r.data = append([]byte(nil), unsafe.Slice(bytesAt(p+16), n)...)
-	}
-	purego.SyscallN(libc.free, p)
-	return r
+	n := binary.LittleEndian.Uint64(head[8:])
+	return reply{status: int64(binary.LittleEndian.Uint64(head)), data: bytesOf(p+16, int(n)), block: p}
 }
+
+func freeBlock(p uintptr) { purego.SyscallN(libc.free, p) }
 
 func (m *Module) load() (*library, error) {
 	m.once.Do(func() { m.lib, m.err = m.open() })
@@ -138,7 +137,7 @@ func (m *Module) open() (*library, error) {
 	if err := fl.Load(); err != nil {
 		return nil, fmt.Errorf("native: %w", err)
 	}
-	lib := &library{lib: fl, syms: map[string]uintptr{}}
+	lib := &library{lib: fl}
 	init, err := lib.sym(m, "init")
 	if err != nil {
 		return nil, err
@@ -201,24 +200,22 @@ func newestSource(dir string) time.Time {
 }
 
 func (l *library) sym(m *Module, name string) (uintptr, error) {
-	full := "mygo_" + m.Symbol + "_" + name
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if p, ok := l.syms[full]; ok {
-		return p, nil
+	if p, ok := l.syms.Load(name); ok {
+		return p.(uintptr), nil
 	}
+	full := "mygo_" + m.Symbol + "_" + name
 	p, err := l.lib.Symbol(full)
 	if err != nil {
 		return 0, fmt.Errorf("native: %s has no %s: regenerate it with mygo generate", LibraryName(m.Name), full)
 	}
-	l.syms[full] = p
+	l.syms.Store(name, p)
 	return p, nil
 }
 
 func (l *library) invoke(m *Module, name string, h uint64, args []byte, call uint64) reply {
 	fn, err := l.sym(m, name)
 	if err != nil {
-		return reply{statusError, encodeError(err)}
+		return reply{status: statusError, data: errorBlock(err)}
 	}
 	p, _, _ := purego.SyscallN(fn, uintptr(h), bytesPointer(args), uintptr(len(args)), uintptr(call))
 	runtime.KeepAlive(args)
@@ -238,9 +235,20 @@ func (l *library) release(m *Module, h uint64)   { l.simple(m, "release", uintpt
 func (l *library) cancel(m *Module, call uint64) { l.simple(m, "cancel", uintptr(call)) }
 func (l *library) next(m *Module, call uint64)   { l.simple(m, "next", uintptr(call)) }
 
+// resume answers a continuation with a block the platform frees.
 func (l *library) resume(m *Module, cont uint64, status int64, data []byte) {
-	l.simple(m, "resume", uintptr(cont), uintptr(status), bytesPointer(data), uintptr(len(data)))
-	runtime.KeepAlive(data)
+	l.simple(m, "resume", uintptr(cont), newBlock(status, data))
+}
+
+// direct calls fn, a method of numbers, on the object h.
+func (l *library) direct(fn uintptr, h uint64, args []uintptr) uintptr {
+	// SyscallN's arguments escape, whatever their size: the fewer, the
+	// less it allocates.
+	a := make([]uintptr, 1+len(args))
+	a[0] = uintptr(h)
+	copy(a[1:], args)
+	r, _, _ := purego.SyscallN(fn, a...)
+	return r
 }
 
 func allocate(n int) uintptr {

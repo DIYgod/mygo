@@ -14,6 +14,7 @@ import (
 	"github.com/egoist/mygo/internal/wait"
 	"github.com/egoist/mygo/native"
 	"github.com/egoist/mygo/native/internal/roundtrip"
+	"github.com/egoist/mygo/ui"
 )
 
 // echo makes the module's implementation, skipping where it is not built:
@@ -289,6 +290,27 @@ func TestBuffer(t *testing.T) {
 		if b != byte(i^0x55) {
 			t.Fatalf("byte %d = %#x", i, b)
 		}
+	}
+}
+
+func TestMore(t *testing.T) {
+	e := echo(t)
+	if got := e.Mix(1.5, 2.25, true, -3); got != 1.75 {
+		t.Fatalf("Mix = %v", got)
+	}
+	if got := e.Mix(0, -0.5, false, 127); got != 126.5 {
+		t.Fatalf("Mix = %v", got)
+	}
+	got, err := e.Box(ui.Rect{X: 1, Y: 2, W: 3, H: 4.5})
+	if err != nil || got != (ui.Rect{X: 4, Y: 6.5, W: 3, H: 4.5}) {
+		t.Fatalf("Box = %+v, %v", got, err)
+	}
+	if n := e.Nothing(make([]roundtrip.Empty, 3)); n != 3 {
+		t.Fatalf("Nothing = %d", n)
+	}
+	// Main-thread methods wait for the app, which tests do not run.
+	if _, err := e.OnMain(roundtrip.Record{}, nil); err == nil {
+		t.Fatal("OnMain ran off the main thread")
 	}
 }
 

@@ -1,8 +1,6 @@
 package native
 
 import (
-	"encoding/json"
-	"fmt"
 	"runtime"
 	"unsafe"
 )
@@ -53,24 +51,6 @@ func (b *Buffer) Len() int {
 		return 0
 	}
 	return b.n
-}
-
-// MarshalJSON gives the platform the buffer's address and size.
-func (b *Buffer) MarshalJSON() ([]byte, error) {
-	if b == nil {
-		return []byte("null"), nil
-	}
-	return json.Marshal([2]uint64{uint64(b.p), uint64(b.n)})
-}
-
-// UnmarshalJSON reads a buffer the platform lends.
-func (b *Buffer) UnmarshalJSON(data []byte) error {
-	var v [2]uint64
-	if err := json.Unmarshal(data, &v); err != nil {
-		return fmt.Errorf("native: a buffer crosses as its address and size: %w", err)
-	}
-	b.p, b.n = uintptr(v[0]), int(v[1])
-	return nil
 }
 
 // bytesAt converts the address of native memory, which Go's collector

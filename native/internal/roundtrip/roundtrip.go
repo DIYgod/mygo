@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo/native"
+	"github.com/egoist/mygo/ui"
 )
 
 // Echo returns what it is given.
@@ -54,7 +55,21 @@ type Echo interface {
 	Use(ctx context.Context, s Scorer, words []string) (float64, error)
 	// Fill writes b's index into each byte of buf, xor x.
 	Fill(buf *native.Buffer, x int) (int, error)
+	// Mix sums numbers of each kind, a call of numbers only.
+	Mix(f float32, d float64, b bool, i int8) float64
+	// Box returns r moved by its size.
+	Box(r ui.Rect) (ui.Rect, error)
+	// Nothing returns how many structs without fields it was given.
+	Nothing(e []Empty) int
+	// OnMain runs on the main thread, which go test does not run: the
+	// tests only build it.
+	//
+	//mygo:mainthread
+	OnMain(r Record, f func(in Inner)) (Texts, error)
 }
+
+// Empty has no fields.
+type Empty struct{}
 
 // Counter counts.
 type Counter interface {

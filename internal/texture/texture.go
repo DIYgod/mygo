@@ -5,7 +5,6 @@
 package texture
 
 import (
-	"encoding/json"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -86,13 +85,6 @@ func Lookup(id uint64) *Texture {
 
 // ID identifies the texture for the platform.
 func (t *Texture) ID() uint64 { return t.id }
-
-// MarshalJSON gives the platform the texture's ID.
-func (t *Texture) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		ID uint64 `json:"id"`
-	}{t.id})
-}
 
 // Present shows surface, an IOSurfaceRef whose reference it takes, in the
 // next frame of the windows showing the texture, from any thread.

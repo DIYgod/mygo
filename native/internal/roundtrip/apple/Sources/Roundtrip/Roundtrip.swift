@@ -113,6 +113,17 @@ final class Echoer: Echo {
         for i in 0..<buf.count { buf.bytes[i] = UInt8(truncatingIfNeeded: i ^ x) }
         return buf.count
     }
+
+    func mix(f: Float, d: Double, b: Bool, i: Int8) -> Double { Double(f) + d + (b ? 1 : 0) + Double(i) }
+
+    func box(r: CGRect) throws -> CGRect { r.offsetBy(dx: r.width, dy: r.height) }
+
+    func nothing(e: [Empty]) -> Int { e.count }
+
+    func onMain(r: Record, f: @escaping @Sendable (Inner) -> Void) throws -> Texts {
+        f(r.inner)
+        return Texts(s: r.name, b: r.data)
+    }
 }
 
 final class Counting: Counter, @unchecked Sendable {

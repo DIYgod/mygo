@@ -10,11 +10,11 @@ package native
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"iter"
+	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -226,9 +226,13 @@ func (m *Module) release(h uint64, flags Flags) {
 
 // New makes the implementation of an entry point.
 func (m *Module) New(entry string, flags Flags) (*Object, error) {
-	var h uint64
-	if err := m.call(context.Background(), 0, "new_"+entry, flags, nil, &h); err != nil {
+	d, err := m.call(context.Background(), 0, "new_"+entry, flags, nil)
+	if err != nil {
 		return nil, err
+	}
+	h := d.Uint()
+	if err := d.Close(); err != nil {
+		return nil, fmt.Errorf("native: %s's make%s: %w", m.Name, entry, err)
 	}
 	if h == 0 {
 		return nil, fmt.Errorf("native: %s's make%s returned nothing", m.Name, entry)
@@ -240,36 +244,72 @@ func (m *Module) New(entry string, flags Flags) (*Object, error) {
 // methods flags describe.
 func (m *Module) Object(h uint64, flags Flags) *Object { return m.object(h, flags) }
 
-// Call calls a method of the object that returns at once, decoding what it
-// returns into result unless nil.
-func (o *Object) Call(sym string, flags Flags, args []any, result any) error {
+// Call calls a method of the object that returns at once, with the
+// arguments args, which it releases. Its result is read from the decoder,
+// which the caller closes.
+func (o *Object) Call(sym string, flags Flags, args *Encoder) (*Decoder, error) {
 	if o.closed.Load() {
-		return ErrClosed
+		args.release()
+		return nil, ErrClosed
 	}
-	err := o.m.call(context.Background(), o.h, sym, flags, args, result)
+	d, err := o.m.call(context.Background(), o.h, sym, flags, args)
 	runtime.KeepAlive(o)
-	return err
+	return d, err
 }
 
 // CallContext calls an asynchronous method of the object, which ctx
 // cancels.
-func (o *Object) CallContext(ctx context.Context, sym string, flags Flags, args []any, result any) error {
+func (o *Object) CallContext(ctx context.Context, sym string, flags Flags, args *Encoder) (*Decoder, error) {
 	if o.closed.Load() {
-		return ErrClosed
+		args.release()
+		return nil, ErrClosed
 	}
 	if err := ctx.Err(); err != nil {
-		return err
+		args.release()
+		return nil, err
 	}
-	err := o.m.callAsync(ctx, o.h, sym, flags, args, result)
+	d, err := o.m.callAsync(ctx, o.h, sym, args)
 	runtime.KeepAlive(o)
-	return err
+	return d, err
 }
+
+// Direct calls a method whose arguments and result are numbers, as the
+// registers of a C function, without encoding them: integers as their
+// bits, floats as those of a float64 (FloatArg), bools as 0 or 1
+// (BoolArg). It returns 0 if the object is closed or the implementation
+// does not load, as such methods return no error.
+func (o *Object) Direct(sym string, args ...uintptr) uintptr {
+	if o.closed.Load() {
+		return 0
+	}
+	r := o.m.direct(o.h, sym, args)
+	runtime.KeepAlive(o)
+	return r
+}
+
+// BoolArg is a bool as Direct passes it.
+func BoolArg(b bool) uintptr {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// FloatArg is a float as Direct passes it.
+func FloatArg(f float64) uintptr { return uintptr(math.Float64bits(f)) }
+
+// FloatResult is the float a Direct call returned.
+func FloatResult(r uintptr) float64 { return math.Float64frombits(uint64(r)) }
 
 // Subscribe calls a method that returns a Closer, which stops what it
 // started and releases the callbacks funcs, those the call passed.
-func (o *Object) Subscribe(sym string, flags Flags, args []any, funcs ...uint64) io.Closer {
+func (o *Object) Subscribe(sym string, flags Flags, args *Encoder, funcs ...uint64) io.Closer {
 	var h uint64
-	err := o.Call(sym, flags, args, &h)
+	d, err := o.Call(sym, flags, args)
+	if err == nil {
+		h = d.Uint()
+		err = d.Close()
+	}
 	if err != nil || h == 0 {
 		// The platform kept none of them.
 		Forget(funcs...)
@@ -295,13 +335,13 @@ func (o *Object) Close() error {
 		var cerr error
 		err = onMain(o.flags, func() {
 			viewGone(uintptr(o.h))
-			cerr = o.m.call(context.Background(), o.h, "close", o.flags, nil, nil)
+			cerr = o.m.callNone(o.h, "close", o.flags)
 		})
 		if err == nil {
 			err = cerr
 		}
 	} else {
-		err = o.m.call(context.Background(), o.h, "close", 0, nil, nil)
+		err = o.m.callNone(o.h, "close", 0)
 	}
 	releaseFuncs(o.funcs)
 	runtime.KeepAlive(o)
@@ -311,15 +351,10 @@ func (o *Object) Close() error {
 // Stream calls a method that returns a stream, as an iterator that starts
 // it. prepare makes the call's arguments as the loop starts, and returns
 // the handles of the callbacks and values of Go's among them, which are
-// forgotten if the stream does not start; keep are the arguments that
-// stand for memory or objects of the platform's, kept reachable until the
-// stream ends.
-func Stream[T any](ctx context.Context, o *Object, sym string, flags Flags, prepare func() ([]any, []uint64), keep ...any) iter.Seq2[T, error] {
-	return StreamMap(ctx, o, sym, flags, prepare, func(v T) T { return v }, keep...)
-}
-
-// StreamMap is Stream for values that cross as D and are given to Go as T.
-func StreamMap[D, T any](ctx context.Context, o *Object, sym string, flags Flags, prepare func() ([]any, []uint64), conv func(D) T, keep ...any) iter.Seq2[T, error] {
+// forgotten if the stream does not start; dec reads a value; keep are the
+// arguments that stand for memory or objects of the platform's, kept
+// reachable until the stream ends.
+func Stream[T any](ctx context.Context, o *Object, sym string, flags Flags, prepare func() (*Encoder, []uint64), dec func(*Decoder) T, keep ...any) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
 		defer runtime.KeepAlive(keep)
 		var zero T
@@ -348,12 +383,13 @@ func StreamMap[D, T any](ctx context.Context, o *Object, sym string, flags Flags
 				yield(zero, err)
 				return
 			}
-			var d D
-			if err := json.Unmarshal(data, &d); err != nil {
-				yield(zero, fmt.Errorf("native: %s: %w", sym, err))
+			d := Decoder{b: data}
+			v := dec(&d)
+			if d.err != nil {
+				yield(zero, fmt.Errorf("native: %s: %w", sym, d.err))
 				return
 			}
-			if !yield(conv(d), nil) {
+			if !yield(v, nil) {
 				return
 			}
 		}
@@ -371,30 +407,20 @@ func Seq[T any](s iter.Seq2[T, error]) iter.Seq[T] {
 	}
 }
 
-// Args are the arguments the platform passes to Go: to a callback, or to a
-// method of an interface Go implements.
-type Args []json.RawMessage
-
-// Decode decodes the argument i into v.
-func (a Args) Decode(i int, v any) error {
-	if i >= len(a) {
-		return fmt.Errorf("native: argument %d is missing", i)
-	}
-	return json.Unmarshal(a[i], v)
-}
-
 // Func registers a callback, which the platform calls with its arguments,
-// and returns its handle. A notification (notify) returns nothing and runs
-// later, in order, on the main thread when the app runs; a question runs
-// at once on the thread that asks and returns its answer.
-func Func(fn func(Args) (any, error), notify bool) uint64 {
+// and returns its handle: fn reads them from d, and writes its result to
+// e. A notification (notify) returns nothing and runs later, in order, on
+// the main thread when the app runs, with e nil; a question runs at once on
+// the thread that asks and returns its answer.
+func Func(fn func(d *Decoder, e *Encoder) error, notify bool) uint64 {
 	return registerGo(&goValue{fn: fn, notify: notify})
 }
 
 // Export registers a value of an interface Go implements, which the
 // platform calls through dispatch, and returns its handle. dispatch calls
-// its method number method with args; ctx is that of a method taking one.
-func Export(m *Module, v any, dispatch func(ctx context.Context, method int, args Args) (any, error)) uint64 {
+// its method number method with the arguments in d, and writes its result
+// to e; ctx is that of a method taking one.
+func Export(m *Module, v any, dispatch func(ctx context.Context, method int, d *Decoder, e *Encoder) error) uint64 {
 	if v == nil {
 		return 0
 	}
@@ -405,10 +431,10 @@ func Export(m *Module, v any, dispatch func(ctx context.Context, method int, arg
 // holds.
 type goValue struct {
 	m        *Module
-	fn       func(Args) (any, error)
+	fn       func(*Decoder, *Encoder) error
 	notify   bool
 	v        any
-	dispatch func(ctx context.Context, method int, args Args) (any, error)
+	dispatch func(ctx context.Context, method int, d *Decoder, e *Encoder) error
 	dead     atomic.Bool
 }
 
@@ -441,66 +467,74 @@ func releaseFuncs(ids []uint64) {
 	}
 }
 
-// errJSON is how errors cross, both ways.
-type errJSON struct {
-	Code        string `json:"code,omitempty"`
-	Domain      string `json:"domain,omitempty"`
-	Number      int    `json:"errCode,omitempty"`
-	Message     string `json:"message,omitempty"`
-	Unsupported bool   `json:"unsupported,omitempty"`
-	Canceled    bool   `json:"canceled,omitempty"`
-	Closed      bool   `json:"closed,omitempty"`
-}
+// The kinds of errors, as they cross both ways: the kind, then the code,
+// domain, number and message.
+const (
+	errOther       = 0 // the platform's own, of a domain
+	errCode        = 1 // one the module declares
+	errUnsupported = 2
+	errClosed      = 3
+	errCanceled    = 4
+	errGo          = 5 // an error of Go's, which only says what it is
+)
 
 // decodeError turns an error the platform threw into Go's.
 func (m *Module) decodeError(ctx context.Context, data []byte) error {
-	var e errJSON
-	if err := json.Unmarshal(data, &e); err != nil {
-		return fmt.Errorf("native: %s threw an error that does not decode: %s", m.Name, data)
+	d := Decoder{b: data}
+	kind := d.take(1)
+	code, domain, number, message := d.String(), d.String(), int(d.Int()), d.String()
+	if d.err != nil {
+		return fmt.Errorf("native: %s threw an error that does not decode: %x", m.Name, data)
 	}
-	switch {
-	case e.Unsupported:
+	switch kind[0] {
+	case errUnsupported:
 		return errors.ErrUnsupported
-	case e.Closed:
+	case errClosed:
 		return ErrClosed
-	case e.Canceled:
+	case errCanceled:
 		if ctx != nil && ctx.Err() != nil {
 			return ctx.Err()
 		}
 		return context.Canceled
-	case e.Code != "":
-		for _, d := range m.Errors {
-			if d.Code == e.Code {
-				return d
+	case errCode:
+		for _, e := range m.Errors {
+			if e.Code == code {
+				return e
 			}
 		}
-		return &Error{Code: e.Code, Message: e.Message}
+		return &Error{Code: code, Message: message}
+	case errGo:
+		return &Error{Message: message}
 	}
-	return &Error{Domain: e.Domain, Number: e.Number, Message: e.Message}
+	return &Error{Domain: domain, Number: number, Message: message}
 }
 
-// encodeError turns a Go error into what the platform throws.
-func encodeError(err error) []byte {
-	var e errJSON
+// encodeError writes a Go error as the platform throws it.
+func encodeError(e *Encoder, err error) {
 	var ne *Error
+	kind, code := errGo, ""
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		e.Canceled = true
+		kind = errCanceled
 	case errors.Is(err, errors.ErrUnsupported):
-		e.Unsupported = true
+		kind = errUnsupported
+	case errors.Is(err, ErrClosed):
+		kind = errClosed
 	case errors.As(err, &ne) && ne.Code != "":
-		e.Code = ne.Code
+		kind, code = errCode, ne.Code
 	}
-	e.Message = err.Error()
-	data, _ := json.Marshal(e)
-	return data
+	e.b = append(e.b, byte(kind))
+	e.String(code)
+	e.String("")
+	e.Int(0)
+	e.String(err.Error())
 }
 
-func encodeArgs(args []any) ([]byte, error) {
-	if args == nil {
-		return nil, nil
-	}
-	return json.Marshal(args)
+// errorBlock is the encoding of err.
+func errorBlock(err error) []byte {
+	var e Encoder
+	encodeError(&e, err)
+	return e.b
 }
 
 // bytesPointer returns the address of data's first byte, or 0.

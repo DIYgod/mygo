@@ -21,7 +21,7 @@ func SourceLine(hash string) string { return "mygo:native " + Version + " " + ha
 // per entry point and the values that call the implementation.
 func GenerateGo(m *Module, minMacOS string) ([]byte, error) {
 	var b bytes.Buffer
-	g := &goGen{m: m, b: &b}
+	g := &goGen{m: m, b: &b, w: newWire(m)}
 	fmt.Fprintf(&b, "%s// %s\n\npackage %s\n\nIMPORTS\n", goHeader, SourceLine(m.Hash), m.Package)
 	var errs, deps []string
 	for _, e := range m.Errors {
@@ -72,8 +72,12 @@ func _dir() string {
 			g.proxy(it)
 		}
 	}
+	g.w.goFuncs(g.p)
 	out := b.String()
 	var imports []string
+	for path, mod := range g.w.extra {
+		imports = append(imports, fmt.Sprintf("_%s %q", mod.Package, path))
+	}
 	uses := func(pkg string) bool {
 		return regexp.MustCompile(`(^|[^A-Za-z0-9_.])` + pkg + `\.`).MatchString(out)
 	}
@@ -130,6 +134,7 @@ func _dir() string {
 type goGen struct {
 	m *Module
 	b *bytes.Buffer
+	w *wire
 }
 
 func (g *goGen) p(format string, args ...any) { fmt.Fprintf(g.b, format, args...) }
@@ -218,10 +223,10 @@ func keptAlive(t *Type) bool {
 	return false
 }
 
-// argExprs returns the expressions of a call's arguments, with the
-// statements that prepare them, the handles of its callbacks and values
-// of Go's, and the arguments to keep alive.
-func (g *goGen) argExprs(m *Method) (pre []string, args []string, funcs []string, keep []string) {
+// argExprs returns the statements that write a call's arguments to the
+// encoder _e, with the statements that prepare them, the handles of its
+// callbacks and values of Go's, and the arguments to keep alive.
+func (g *goGen) argExprs(m *Method) (pre []string, enc []string, funcs []string, keep []string) {
 	for i, p := range m.Params {
 		if keptAlive(p.Type) {
 			keep = append(keep, p.Name)
@@ -230,23 +235,19 @@ func (g *goGen) argExprs(m *Method) (pre []string, args []string, funcs []string
 		case Func:
 			v := fmt.Sprintf("_f%d", i)
 			pre = append(pre, fmt.Sprintf("var %s uint64\n\tif %s != nil {\n\t\t%s = _native.Func(%s, %v)\n\t}", v, p.Name, v, g.funcWrapper(p.Name, p.Type), notifies(p.Type)))
-			args = append(args, v)
+			enc = append(enc, "_e.Uint("+v+")")
 			funcs = append(funcs, v)
 		case InterfaceType:
 			if p.Type.Iface.ByGo {
 				v := fmt.Sprintf("_g%d", i)
-				pre = append(pre, fmt.Sprintf("var %s uint64\n\tif %s != nil {\n\t\t%s = _native.Export(_module, %s, func(_c _context.Context, _m int, _a _native.Args) (any, error) { return _dispatch%s(%s, _c, _m, _a) })\n\t}", v, p.Name, v, p.Name, p.Type.Iface.Name, p.Name))
-				args = append(args, v)
+				pre = append(pre, fmt.Sprintf("var %s uint64\n\tif %s != nil {\n\t\t%s = _native.Export(_module, %s, func(_c _context.Context, _m int, _d *_native.Decoder, _e *_native.Encoder) error { return _dispatch%s(%s, _c, _m, _d, _e) })\n\t}", v, p.Name, v, p.Name, p.Type.Iface.Name, p.Name))
+				enc = append(enc, "_e.Uint("+v+")")
 				funcs = append(funcs, v)
 			} else {
-				args = append(args, "_native.HandleOf("+p.Name+")")
+				enc = append(enc, g.w.goEnc(ref{p.Type, g.m}, p.Name))
 			}
-		case Window:
-			args = append(args, "_native.WindowHandle("+p.Name+")")
-		case View:
-			args = append(args, "_native.HandleOf("+p.Name+")")
 		default:
-			args = append(args, p.Name)
+			enc = append(enc, g.w.goEnc(ref{p.Type, g.m}, p.Name))
 		}
 	}
 	return
@@ -254,27 +255,43 @@ func (g *goGen) argExprs(m *Method) (pre []string, args []string, funcs []string
 
 func notifies(t *Type) bool { return t.Result == nil && !t.Err }
 
-// funcWrapper returns a function of native.Args that calls the Go
-// function fn, of type t.
+// decodeParams writes the statements that read params from _d into _p0,
+// _p1 …, and returns their names.
+func (g *goGen) decodeParams(b *strings.Builder, params []*Param) []string {
+	var names []string
+	for i, p := range params {
+		fmt.Fprintf(b, "_p%d := %s\n", i, g.w.goDec(ref{p.Type, g.m}))
+		names = append(names, fmt.Sprintf("_p%d", i))
+	}
+	if len(params) > 0 {
+		b.WriteString("if _err := _d.Err(); _err != nil {\nreturn _err\n}\n")
+	}
+	return names
+}
+
+// returnResult writes the statements that call c, which returns a value
+// of t (or none) and an error if err, write its value to _e, and return
+// its error.
+func (g *goGen) returnResult(b *strings.Builder, c string, t *Type, err bool) {
+	switch {
+	case t != nil && err:
+		fmt.Fprintf(b, "_r, _err := %s\nif _err != nil {\nreturn _err\n}\n%s\nreturn nil\n", c, g.w.goEnc(ref{t, g.m}, "_r"))
+	case t != nil:
+		fmt.Fprintf(b, "_r := %s\n%s\nreturn nil\n", c, g.w.goEnc(ref{t, g.m}, "_r"))
+	case err:
+		b.WriteString("return " + c + "\n")
+	default:
+		b.WriteString(c + "\nreturn nil\n")
+	}
+}
+
+// funcWrapper returns a function that calls the Go function fn, of type
+// t, with the arguments in _d, and writes its result to _e.
 func (g *goGen) funcWrapper(fn string, t *Type) string {
 	var b strings.Builder
-	b.WriteString("func(_a _native.Args) (any, error) {\n")
-	var call []string
-	for i, p := range t.Params {
-		fmt.Fprintf(&b, "var _p%d %s\nif _err := _a.Decode(%d, &_p%d); _err != nil {\nreturn nil, _err\n}\n", i, p.Type.Go, i, i)
-		call = append(call, fmt.Sprintf("_p%d", i))
-	}
-	c := fn + "(" + strings.Join(call, ", ") + ")"
-	switch {
-	case t.Result != nil && t.Err:
-		b.WriteString("return " + c + "\n")
-	case t.Result != nil:
-		b.WriteString("return " + c + ", nil\n")
-	case t.Err:
-		b.WriteString("return nil, " + c + "\n")
-	default:
-		b.WriteString(c + "\nreturn nil, nil\n")
-	}
+	b.WriteString("func(_d *_native.Decoder, _e *_native.Encoder) error {\n")
+	call := g.decodeParams(&b, t.Params)
+	g.returnResult(&b, fn+"("+strings.Join(call, ", ")+")", t.Result, t.Err)
 	b.WriteString("}")
 	return b.String()
 }
@@ -288,10 +305,16 @@ func (g *goGen) method(it *Interface, m *Method) {
 		g.p("\treturn _x.NativeObject().Close()\n}\n")
 		return
 	}
-	pre, args, funcs, keep := g.argExprs(m)
-	argList := "nil"
-	if len(args) > 0 {
-		argList = "[]any{" + strings.Join(args, ", ") + "}"
+	if direct(m) {
+		g.direct(sym, m)
+		return
+	}
+	pre, enc, funcs, keep := g.argExprs(m)
+	args := "nil"
+	encode := ""
+	if len(enc) > 0 {
+		args = "_e"
+		encode = "_e := _native.NewEncoder()\n" + strings.Join(enc, "\n") + "\n"
 	}
 	if m.Stream != 0 {
 		// The arguments are made as the loop starts the stream, which
@@ -300,17 +323,17 @@ func (g *goGen) method(it *Interface, m *Method) {
 		if len(funcs) > 0 {
 			funcList = "[]uint64{" + strings.Join(funcs, ", ") + "}"
 		}
-		prepare := "func() ([]any, []uint64) {\n"
+		prepare := "func() (*_native.Encoder, []uint64) {\n"
 		for _, s := range pre {
 			prepare += s + "\n"
 		}
-		prepare += "return " + argList + ", " + funcList + "\n}"
-		var expr string
+		prepare += encode + "return " + args + ", " + funcList + "\n}"
+		T := g.w.goType(ref{m.Result, g.m})
+		dec := g.w.goDec(ref{m.Result, g.m})
 		if m.Result.Kind == InterfaceType {
-			expr = fmt.Sprintf("_native.StreamMap(_ctx, _x.NativeObject(), %q, %s, %s, %s%s)", sym, flags, prepare, wrapName(m.Result), prefixComma(keep))
-		} else {
-			expr = fmt.Sprintf("_native.Stream[%s](_ctx, _x.NativeObject(), %q, %s, %s%s)", m.Result.Go, sym, flags, prepare, prefixComma(keep))
+			dec = wrapName(m.Result) + "(" + dec + ")"
 		}
+		expr := fmt.Sprintf("_native.Stream(_ctx, _x.NativeObject(), %q, %s, %s, func(_d *_native.Decoder) %s { return %s }%s)", sym, flags, prepare, T, dec, prefixComma(keep))
 		if m.Stream == 1 {
 			expr = "_native.Seq(" + expr + ")"
 		}
@@ -323,21 +346,28 @@ func (g *goGen) method(it *Interface, m *Method) {
 	for _, k := range keep {
 		g.p("\tdefer _runtime.KeepAlive(%s)\n", k)
 	}
+	g.p("%s", encode)
 	forget := ""
 	if len(funcs) > 0 {
 		forget = "\t\t_native.Forget(" + strings.Join(funcs, ", ") + ")\n"
 	}
 	if m.Closer {
-		g.p("\treturn _x.NativeObject().Subscribe(%q, %s, %s%s)\n}\n", sym, flags, argList, prefixComma(funcs))
+		g.p("\treturn _x.NativeObject().Subscribe(%q, %s, %s%s)\n}\n", sym, flags, args, prefixComma(funcs))
 		return
 	}
-	callFn := fmt.Sprintf("_x.NativeObject().Call(%q, %s, %s, ", sym, flags, argList)
+	call := fmt.Sprintf("_x.NativeObject().Call(%q, %s, %s)", sym, flags, args)
 	if m.Ctx {
-		callFn = fmt.Sprintf("_x.NativeObject().CallContext(_ctx, %q, %s, %s, ", sym, flags, argList)
+		call = fmt.Sprintf("_x.NativeObject().CallContext(_ctx, %q, %s, %s)", sym, flags, args)
+	}
+	ret := func(v string) string {
+		if m.Err {
+			return "return " + v + ", _err"
+		}
+		return "return " + v
 	}
 	switch {
 	case m.Result == nil:
-		g.p("\t_err := %snil)\n", callFn)
+		g.p("\t_d, _err := %s\n\tif _err == nil {\n\t\t_err = _d.Close()\n\t}\n", call)
 		if forget != "" {
 			g.p("\tif _err != nil {\n%s\t}\n", forget)
 		}
@@ -347,25 +377,51 @@ func (g *goGen) method(it *Interface, m *Method) {
 			g.p("\t_ = _err\n")
 		}
 	case m.Result.Kind == InterfaceType:
-		g.p("\tvar _h uint64\n\t_err := %s&_h)\n", callFn)
-		g.p("\tif _err != nil {\n%s", forget)
+		g.p("\tvar _h uint64\n\t_d, _err := %s\n\tif _err == nil {\n\t\t_h = _d.Uint()\n\t\t_err = _d.Close()\n\t}\n", call)
+		g.p("\tif _err != nil {\n%s\t\t%s\n\t}\n", forget, ret("nil"))
 		if m.Err {
-			g.p("\t\treturn nil, _err\n\t}\n\treturn %s(_h), nil\n", wrapName(m.Result))
+			g.p("\treturn %s(_h), nil\n", wrapName(m.Result))
 		} else {
-			g.p("\t\treturn nil\n\t}\n\treturn %s(_h)\n", wrapName(m.Result))
+			g.p("\treturn %s(_h)\n", wrapName(m.Result))
 		}
 	default:
-		g.p("\tvar _r %s\n\t_err := %s&_r)\n", m.Result.Go, callFn)
+		g.p("\tvar _r %s\n\t_d, _err := %s\n\tif _err == nil {\n\t\t_r = %s\n\t\t_err = _d.Close()\n\t}\n", m.Result.Go, call, g.w.goDec(ref{m.Result, g.m}))
 		if forget != "" {
 			g.p("\tif _err != nil {\n%s\t}\n", forget)
 		}
-		if m.Err {
-			g.p("\treturn _r, _err\n")
-		} else {
-			g.p("\t_ = _err\n\treturn _r\n")
+		if !m.Err {
+			g.p("\t_ = _err\n")
 		}
+		g.p("\t%s\n", ret("_r"))
 	}
 	g.p("}\n")
+}
+
+// direct writes the body of a method of numbers, which calls the C
+// function of the implementation with them.
+func (g *goGen) direct(sym string, m *Method) {
+	var args []string
+	for _, p := range m.Params {
+		switch p.Type.Kind {
+		case Bool:
+			args = append(args, "_native.BoolArg("+p.Name+")")
+		case Float:
+			args = append(args, "_native.FloatArg(float64("+p.Name+"))")
+		default:
+			args = append(args, "uintptr("+p.Name+")")
+		}
+	}
+	call := fmt.Sprintf("_x.NativeObject().Direct(%q%s)", sym+"_direct", prefixComma(args))
+	switch {
+	case m.Result == nil:
+		g.p("\t%s\n}\n", call)
+	case m.Result.Kind == Bool:
+		g.p("\treturn %s != 0\n}\n", call)
+	case m.Result.Kind == Float:
+		g.p("\treturn %s(_native.FloatResult(%s))\n}\n", m.Result.Go, call)
+	default:
+		g.p("\treturn %s(%s)\n}\n", m.Result.Go, call)
+	}
 }
 
 func prefixComma(s []string) string {
@@ -378,28 +434,16 @@ func prefixComma(s []string) string {
 // dispatch writes the function the platform calls the methods of a Go
 // value of an interface Go implements through.
 func (g *goGen) dispatch(it *Interface) {
-	g.p("\n// _dispatch%s calls the method number _m of _v for the platform.\nfunc _dispatch%s(_v %s, _ctx _context.Context, _m int, _a _native.Args) (any, error) {\n\tswitch _m {\n", it.Name, it.Name, it.Name)
+	g.p("\n// _dispatch%s calls the method number _m of _v for the platform, with\n// the arguments in _d, and writes its result to _e.\nfunc _dispatch%s(_v %s, _ctx _context.Context, _m int, _d *_native.Decoder, _e *_native.Encoder) error {\n\tswitch _m {\n", it.Name, it.Name, it.Name)
 	for i, m := range it.Methods {
 		g.p("\tcase %d:\n", i)
-		var call []string
+		var b strings.Builder
+		call := g.decodeParams(&b, m.Params)
 		if m.Ctx {
-			call = append(call, "_ctx")
+			call = append([]string{"_ctx"}, call...)
 		}
-		for j, p := range m.Params {
-			g.p("\t\tvar _p%d %s\n\t\tif _err := _a.Decode(%d, &_p%d); _err != nil {\n\t\t\treturn nil, _err\n\t\t}\n", j, p.Type.Go, j, j)
-			call = append(call, fmt.Sprintf("_p%d", j))
-		}
-		c := "_v." + m.Name + "(" + strings.Join(call, ", ") + ")"
-		switch {
-		case m.Result != nil && m.Err:
-			g.p("\t\treturn %s\n", c)
-		case m.Result != nil:
-			g.p("\t\treturn %s, nil\n", c)
-		case m.Err:
-			g.p("\t\treturn nil, %s\n", c)
-		default:
-			g.p("\t\t%s\n\t\treturn nil, nil\n", c)
-		}
+		g.returnResult(&b, "_v."+m.Name+"("+strings.Join(call, ", ")+")", m.Result, m.Err)
+		g.p("%s", b.String())
 	}
-	g.p("\t}\n\treturn nil, _fmt.Errorf(\"native: %s has no method %%d\", _m)\n}\n", it.Name)
+	g.p("\t}\n\treturn _fmt.Errorf(\"native: %s has no method %%d\", _m)\n}\n", it.Name)
 }
