@@ -1,6 +1,8 @@
 package nativelib
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -69,5 +71,17 @@ func TestMinMacOS(t *testing.T) {
 	}
 	if _, err := Parse([]byte(`{"libraries": [{"name": "x", "build": {"zig": ".", "macOS": "13; rm"}}]}`)); err == nil {
 		t.Error("accepted an invalid macOS version")
+	}
+}
+
+func TestModuleRootRelative(t *testing.T) {
+	// The package's directory, below the module's root, as a relative
+	// path whose walk up passes the working directory.
+	root, err := ModuleRoot(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err != nil {
+		t.Fatalf("ModuleRoot(\".\") = %s, which has no go.mod", root)
 	}
 }

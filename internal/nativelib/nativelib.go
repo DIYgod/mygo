@@ -334,7 +334,12 @@ func LocalDir(root, goos, goarch string) string {
 
 // ModuleRoot returns the directory of the go.mod that dir is in.
 func ModuleRoot(dir string) (string, error) {
-	for d := dir; ; {
+	// A relative dir would stop at the working directory.
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
+	for d := abs; ; {
 		if _, err := os.Stat(filepath.Join(d, "go.mod")); err == nil {
 			return d, nil
 		}
