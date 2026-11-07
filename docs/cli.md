@@ -197,9 +197,34 @@ when there are errors.
 
 ## mygo native
 
-The commands of [native modules](native-modules.md): Go interfaces
-implemented in a platform's own language. `[module dir]` defaults to the
-current directory.
+The commands of [native libraries](native-libraries.md), built from Swift,
+Rust or Zig sources and bound from Go, and of
+[native modules](native-modules.md): Go interfaces implemented in a
+platform's own language. `[module dir]` defaults to the current directory.
+
+### mygo native build
+
+```
+mygo native build [flags] [dir]
+```
+
+Builds the [native libraries](native-libraries.md) that the packages in
+`dir` name in their `mygo-plugin.json` from their sources, with cargo or
+zig, for every platform, writes the files to publish into
+`.mygo/native/release` of the module, named after their SHA-256, and
+their names, URLs and SHA-256 into `mygo-plugin.json`. Platforms that do
+not build here (Rust's macOS libraries off a Mac) are listed at the end and
+left as they were. Flags go before the directory. `mygo dev` and `mygo build` build the libraries
+of the app's own packages themselves; this publishes those of a package
+for the apps of others, which then need neither Rust nor Zig.
+
+| Flag | |
+|---|---|
+| `-target` | the platforms, `GOOS-GOARCH` separated by commas, `all` (the default) or `host`, which builds this machine's library for `go run` and `go test` and leaves `mygo-plugin.json` alone |
+| `-release` | the URL of the directory the files are published in, as `https://github.com/<owner>/<repo>/releases/download/<tag>` (default: the library's `release`) |
+| `-out` | the directory of the files to publish |
+| `-upload` | uploads the files to the GitHub release of `-release` with the GitHub CLI, creating it if needed |
+| `-force` | builds the platforms whose published files were built from the sources as they are too, which it otherwise skips |
 
 ### mygo native new
 
@@ -303,6 +328,7 @@ Prints the version of the CLI.
 | `MYGO_WINDOWS_CERTIFICATE_PASSWORD` | the password of `windows.certificate`, for `mygo build` |
 | `MYGO_CLI_BINARY` | a build of the CLI for the `mygo-cli` package to run |
 | `MYGO_ENV` | `production` makes an app behave like a production build, e.g. without the web inspector |
+| `MYGO_NATIVE_<NAME>` | the file of the [native library](native-libraries.md#where-libraries-are-found) `<name>` (in upper case, with `_` for other characters than letters and digits) that package `ffi` loads, over the others |
 | `MYGO_LOCALE` | the language the app runs in, over the one it keeps, which `mygo dev -lang` sets |
 
 For an app with dependencies that need cgo:

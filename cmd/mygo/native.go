@@ -470,9 +470,11 @@ func plistEqual(a, b any) bool {
 func runNative(args []string) error {
 	const usage = `Usage: mygo native <command> [arguments]
 
-Commands of native modules: Go interfaces implemented in a platform's own
-language (docs/native-modules.md).
+Native libraries, built from Swift, Rust or Zig sources and bound from Go
+(docs/native-libraries.md), and native modules: Go interfaces implemented
+in a platform's own language (docs/native-modules.md).
 
+	build [flags] [dir]                         build the native libraries of the packages in dir, ready to publish
 	new [-platform <platforms>] <module name>   make a module in modules/<name>, or at a path
 	add <platform> [module dir]                 implement a module in another platform's directory
 	check [module dir]                          generate, build and vet a module, listing problems
@@ -485,6 +487,8 @@ language (docs/native-modules.md).
 		return flagErrHelp()
 	}
 	switch args[0] {
+	case "build":
+		return runNativeBuild(args[1:])
 	case "new":
 		return runNativeNew(args[1:])
 	case "add":

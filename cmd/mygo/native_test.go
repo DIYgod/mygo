@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/internal/nativegen"
+	"github.com/egoist/mygo/internal/nativelib"
 )
 
 func TestMergeModulePlists(t *testing.T) {
@@ -104,7 +105,7 @@ func TestPrebuiltNativeModule(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(data) }))
 	defer srv.Close()
 	sum := sha256.Sum256(data)
-	p := &prebuilt{Source: hash, File: nativeFile{Name: "thing.tar.gz", URL: srv.URL + "/thing.tar.gz", SHA256: hex.EncodeToString(sum[:])}}
+	p := &prebuilt{Source: hash, File: nativelib.File{Name: "thing.tar.gz", URL: srv.URL + "/thing.tar.gz", SHA256: hex.EncodeToString(sum[:])}}
 	if err := writePrebuilt(dir, "apple", p); err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +269,7 @@ func TestPrebuildUpToDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &prebuilt{Source: hash, File: nativeFile{Name: "x.tar.gz", URL: "https://example.com/x.tar.gz", SHA256: strings.Repeat("0", 64)}}
+	p := &prebuilt{Source: hash, File: nativelib.File{Name: "x.tar.gz", URL: "https://example.com/x.tar.gz", SHA256: strings.Repeat("0", 64)}}
 	if err := writePrebuilt(dir, "apple", p); err != nil {
 		t.Fatal(err)
 	}

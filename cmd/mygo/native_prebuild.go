@@ -22,6 +22,7 @@ import (
 
 	"github.com/egoist/mygo/internal/download"
 	"github.com/egoist/mygo/internal/nativegen"
+	"github.com/egoist/mygo/internal/nativelib"
 )
 
 // A prebuilt implementation of a native module, for machines without the
@@ -45,8 +46,8 @@ type prebuiltFile struct {
 
 type prebuilt struct {
 	// Source is the hash of the Swift package it was built from.
-	Source string     `json:"source"`
-	File   nativeFile `json:"file"`
+	Source string         `json:"source"`
+	File   nativelib.File `json:"file"`
 }
 
 // defaultPrebuildTag is the release that mygo native prebuild uploads to:
@@ -397,7 +398,7 @@ replaced, so the builds older commits record stay downloadable.`)
 	if err != nil {
 		return err
 	}
-	p := &prebuilt{Source: hash, File: nativeFile{Name: name, URL: url, SHA256: sum}}
+	p := &prebuilt{Source: hash, File: nativelib.File{Name: name, URL: url, SHA256: sum}}
 	if err := writePrebuilt(dir, "apple", p); err != nil {
 		return err
 	}

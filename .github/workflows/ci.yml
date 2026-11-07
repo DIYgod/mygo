@@ -129,6 +129,14 @@ jobs:
       # about six minutes and, on a slow one beside the other packages,
       # past go test's ten: the same tests, more time.
       - run: go test -timeout ${{ runner.os == 'macOS' && '20m' || '10m' }} ./...
+      # A Rust crate that the CLI builds and package ffi binds, with the
+      # cargo of the runners' images, which go test ./... skips unbuilt.
+      - name: Test a native library built from its sources
+        env:
+          MYGO_NATIVE_TESTS: 1
+        run: |
+          go run ./cmd/mygo native build -target host examples/rust-native
+          go test -count=1 ./examples/rust-native/...
       - name: Test without the inspector, as production builds
         if: runner.os == 'Linux'
         run: go test -tags mygo_noinspector ./ui .
