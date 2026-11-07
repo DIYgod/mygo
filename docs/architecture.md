@@ -5301,10 +5301,14 @@ interfaces Swift implements. Three parts make it work:
   Metal renderer marks the textures a source gave (`texture.gpu`) and
   never uploads pixels into one.
 - **Prebuilt implementations** (`native_prebuild.go`): a universal
-  release build packed as `.tar.gz`, uploaded with `gh` to the release
-  `native-<module>-<hash>`, recorded under `native.apple` of the module's
-  `mygo-plugin.json` with the hash of its Swift package's sources
-  (`swiftSourceHash`); `moduleBuild` takes it while the hash matches, in
+  release build packed as `.tar.gz`, named after its SHA-256
+  (`prebuiltName`) and uploaded with `gh` to the one release
+  `native-modules` (`uploadPrebuilt`, which never replaces a file: a name
+  there already is the same bytes), recorded under `native.apple` of the
+  module's `mygo-plugin.json` with the hash of its Swift package's
+  sources, LF line endings, and those of the modules it uses
+  (`moduleSourceHash`); `prebuild` skips a module whose record matches,
+  unless `-force`. `moduleBuild` takes it while the hash matches, in
   release builds and wherever Swift is missing, through the cache of
   native libraries (`fetchNative`), unpacked with no path or link that
   leads out of its directory (`untar`).

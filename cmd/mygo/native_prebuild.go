@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,16 +25,19 @@ import (
 )
 
 // A prebuilt implementation of a native module, for machines without the
-// platform's tools: mygo native prebuild builds it, uploads it as a release
-// asset of the app's repository and records it in the module's
-// mygo-plugin.json, beside what plugins list there:
+// platform's tools: mygo native prebuild builds it, uploads it as an asset
+// of one release of the app's repository (native-modules, which holds
+// every module's builds) and records it in the module's mygo-plugin.json,
+// beside what plugins list there:
 //
-//	{"native": {"apple": {"source": "<hash of apple/>",
+//	{"native": {"apple": {"source": "<moduleSourceHash>",
 //		"file": {"name": "…tar.gz", "url": "https://…", "sha256": "…"}}}}
 //
 // The archive holds lib<Module>.dylib, universal, and the frameworks its
-// Swift package brings. prepareNative uses it where its source matches
-// apple/'s, which keeps it from going stale unnoticed.
+// Swift package brings. It is named after its own SHA-256 and never
+// replaced, so that what older commits record keeps downloading.
+// prepareNative uses it where its source matches the module's, which
+// keeps it from going stale unnoticed.
 
 type prebuiltFile struct {
 	Native map[string]*prebuilt `json:"native"`
@@ -44,8 +49,15 @@ type prebuilt struct {
 	File   nativeFile `json:"file"`
 }
 
+// defaultPrebuildTag is the release that mygo native prebuild uploads to:
+// one for every module, so that prebuilding makes no release, nor tag, per
+// change.
+const defaultPrebuildTag = "native-modules"
+
 // swiftSourceHash hashes what a module's Swift package builds from: its
-// manifest, its resolved dependencies and its sources.
+// manifest, its resolved dependencies and its sources, with line endings
+// as LF, so that checkouts on every platform agree (git turns them into
+// CRLF on Windows with core.autocrlf).
 func swiftSourceHash(dir string) (string, error) {
 	apple := filepath.Join(dir, "apple")
 	h := sha256.New()
@@ -77,8 +89,30 @@ func swiftSourceHash(dir string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		data = bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
 		fmt.Fprintf(h, "%s\x00%d\x00", f, len(data))
 		h.Write(data)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
+// moduleSourceHash hashes what the implementation of module m builds from:
+// its Swift package's sources and those of the native modules it uses,
+// whose Swift it imports and links, so that a prebuilt implementation goes
+// stale with theirs too. A module that uses none has its package's hash.
+func moduleSourceHash(m *nativegen.Module) (string, error) {
+	own, err := swiftSourceHash(m.Dir)
+	if err != nil || len(m.Deps) == 0 {
+		return own, err
+	}
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\x00", own)
+	for _, path := range slices.Sorted(maps.Keys(m.Deps)) {
+		dep, err := moduleSourceHash(m.Deps[path])
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprintf(h, "%s\x00%s\x00", path, dep)
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16], nil
 }
@@ -273,14 +307,19 @@ func gitHubRepo(dir string) (string, error) {
 }
 
 func runNativePrebuild(args []string) error {
-	fs := newFlags("native prebuild", "[-repo owner/name] [-no-upload] [module dir]", `Builds the module's implementations for release, uploads them as release
-assets of the app's repository (the GitHub repository of the module's git
-checkout, or -repo), with the GitHub CLI, and records them in the module's
-mygo-plugin.json, so that machines without the platforms' tools, such as a
-Linux runner, build the app with them. Commit mygo-plugin.json. The builds
-must change with the sources: mygo build uses them only while they match,
-and builds the module itself, or fails, once they do not.`)
+	fs := newFlags("native prebuild", "[-repo owner/name] [-tag name] [-force] [-no-upload] [module dir]", `Builds the module's implementations for release, uploads them as assets
+of a release of the app's repository (the GitHub repository of the
+module's git checkout, or -repo), with the GitHub CLI, and records them in
+the module's mygo-plugin.json, so that machines without the platforms'
+tools, such as a Linux runner, build the app with them. Commit
+mygo-plugin.json. The builds must change with the sources: mygo build uses
+them only while they match, and builds the module itself, or fails, once
+they do not. A module whose recorded build matches its sources is left
+alone, unless -force. Each file is named after its SHA-256 and never
+replaced, so the builds older commits record stay downloadable.`)
 	repo := fs.String("repo", "", "the GitHub repository to upload to, owner/name (default: the git checkout's origin)")
+	tag := fs.String("tag", defaultPrebuildTag, "the release to upload to, created if missing (not as the latest)")
+	force := fs.Bool("force", false, "build and upload even when the recorded build matches the sources")
 	noUpload := fs.Bool("no-upload", false, "build and pack the archive, and print its path, but upload nothing and leave mygo-plugin.json")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -299,14 +338,24 @@ and builds the module itself, or fails, once they do not.`)
 	if !nativegen.HasPlatform(dir, "apple") {
 		return fmt.Errorf("%s has no platform directory to prebuild", dir)
 	}
+	hash, err := moduleSourceHash(m)
+	if err != nil {
+		return err
+	}
+	if !*force && !*noUpload {
+		pre, err := readPrebuilt(dir, "apple")
+		if err != nil {
+			return err
+		}
+		if pre != nil && pre.Source == hash {
+			logf("The prebuilt implementation of %s matches its sources: nothing to do (-force builds it again)", m.Package)
+			return nil
+		}
+	}
 	if runtime.GOOS != "darwin" {
 		return errors.New("prebuilding apple/ needs macOS, with Xcode or its Command Line Tools")
 	}
 	b, err := buildSwiftModule(dir, "universal", true)
-	if err != nil {
-		return err
-	}
-	hash, err := swiftSourceHash(dir)
 	if err != nil {
 		return err
 	}
@@ -315,20 +364,28 @@ and builds the module itself, or fails, once they do not.`)
 		return err
 	}
 	defer os.RemoveAll(work)
-	name := fmt.Sprintf("%s-%s-darwin-universal.tar.gz", m.Package, hash)
-	archive := filepath.Join(work, name)
-	if *noUpload {
-		archive = filepath.Join(dir, "apple", ".build", "mygo", name)
-	}
-	if err := tarDir(archive, append([]string{b.dylib}, b.frameworks...)); err != nil {
+	packed := filepath.Join(work, "archive.tar.gz")
+	if err := tarDir(packed, append([]string{b.dylib}, b.frameworks...)); err != nil {
 		return err
 	}
+	sum, err := download.FileSHA256(packed)
+	if err != nil {
+		return err
+	}
+	name := prebuiltName(m.Package, sum)
 	if *noUpload {
+		archive := filepath.Join(dir, "apple", ".build", "mygo", name)
+		if err := os.MkdirAll(filepath.Dir(archive), 0o755); err != nil {
+			return err
+		}
+		if err := os.Rename(packed, archive); err != nil {
+			return err
+		}
 		logf("Packed %s", cyan(archive))
 		return nil
 	}
-	sum, err := download.FileSHA256(archive)
-	if err != nil {
+	archive := filepath.Join(work, name)
+	if err := os.Rename(packed, archive); err != nil {
 		return err
 	}
 	if *repo == "" {
@@ -336,31 +393,56 @@ and builds the module itself, or fails, once they do not.`)
 			return err
 		}
 	}
-	gh, err := exec.LookPath("gh")
+	url, err := uploadPrebuilt(*repo, *tag, archive)
 	if err != nil {
-		return errors.New("mygo native prebuild uploads with the GitHub CLI (https://cli.github.com), signed in with gh auth login or GH_TOKEN; -no-upload only packs")
+		return err
 	}
-	tag := "native-" + m.Package + "-" + hash
-	if exec.Command(gh, "release", "view", tag, "--repo", *repo).Run() != nil {
-		t := con.start("Creating the release " + tag + " of " + *repo)
-		notes := fmt.Sprintf("The prebuilt implementation of the native module %s, for mygo build on machines without Xcode.", m.Package)
-		out, err := exec.Command(gh, "release", "create", tag, "--repo", *repo, "--title", tag, "--notes", notes, "--latest=false").CombinedOutput()
-		if err != nil {
-			return t.end(fmt.Errorf("gh release create: %v\n%s", err, out), "")
-		}
-		t.done("Created the release " + tag + " of " + *repo)
-	}
-	t := con.start("Uploading " + name)
-	if out, err := exec.Command(gh, "release", "upload", tag, "--repo", *repo, "--clobber", archive).CombinedOutput(); err != nil {
-		return t.end(fmt.Errorf("gh release upload: %v\n%s", err, out), "")
-	}
-	t.done("Uploaded " + name)
-	p := &prebuilt{Source: hash, File: nativeFile{Name: name, URL: fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", *repo, tag, name), SHA256: sum}}
+	p := &prebuilt{Source: hash, File: nativeFile{Name: name, URL: url, SHA256: sum}}
 	if err := writePrebuilt(dir, "apple", p); err != nil {
 		return err
 	}
 	logf("Recorded it in %s: commit it", cyan(filepath.Join(dir, pluginFile)))
 	return nil
+}
+
+// prebuiltName is the file name of a module's prebuilt implementation
+// whose archive has the SHA-256 sum: a build of other bytes gets another
+// name, so that a release never replaces a file a commit records.
+func prebuiltName(pkg, sum string) string {
+	return fmt.Sprintf("%s-darwin-universal-%s.tar.gz", pkg, sum[:16])
+}
+
+// uploadPrebuilt uploads archive to the release tag of the GitHub
+// repository repo (owner/name) with the GitHub CLI, creating the release
+// if needed, not as the repository's latest, which is its apps', and
+// returns its download URL. A file of that name there already is the same
+// one, as names carry the SHA-256: it is not uploaded again, nor replaced.
+func uploadPrebuilt(repo, tag, archive string) (string, error) {
+	gh, err := exec.LookPath("gh")
+	if err != nil {
+		return "", errors.New("mygo native prebuild uploads with the GitHub CLI (https://cli.github.com), signed in with gh auth login or GH_TOKEN; -no-upload only packs")
+	}
+	name := filepath.Base(archive)
+	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, tag, name)
+	assets, err := exec.Command(gh, "release", "view", tag, "--repo", repo, "--json", "assets", "--jq", ".assets[].name").Output()
+	if err != nil {
+		t := con.start("Creating the release " + tag + " of " + repo)
+		notes := "Prebuilt implementations of native modules, for mygo build on machines without the platforms' tools. Recorded in the modules' mygo-plugin.json; files are named after their SHA-256 and never replaced."
+		out, err := exec.Command(gh, "release", "create", tag, "--repo", repo, "--title", tag, "--notes", notes, "--latest=false").CombinedOutput()
+		if err != nil {
+			return "", t.end(fmt.Errorf("gh release create: %v\n%s", err, out), "")
+		}
+		t.done("Created the release " + tag + " of " + repo)
+	} else if slices.Contains(strings.Fields(string(assets)), name) {
+		logf("%s is uploaded already", name)
+		return url, nil
+	}
+	t := con.start("Uploading " + name)
+	if out, err := exec.Command(gh, "release", "upload", tag, "--repo", repo, archive).CombinedOutput(); err != nil {
+		return "", t.end(fmt.Errorf("gh release upload: %v\n%s", err, out), "")
+	}
+	t.done("Uploaded " + name)
+	return url, nil
 }
 
 // writePrebuilt records p in the module's mygo-plugin.json, keeping what

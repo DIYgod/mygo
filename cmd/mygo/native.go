@@ -183,11 +183,11 @@ func moduleBuild(c *Config, dir, goarch string, mode nativeMode) (nativeBuild, e
 	_, lookErr := exec.LookPath("swift")
 	haveSwift := runtime.GOOS == "darwin" && lookErr == nil
 	if pre != nil {
-		hash, err := swiftSourceHash(dir)
+		m, err := nativegen.Load(dir)
 		if err != nil {
 			return nativeBuild{}, err
 		}
-		m, err := nativegen.Load(dir)
+		hash, err := moduleSourceHash(m)
 		if err != nil {
 			return nativeBuild{}, err
 		}

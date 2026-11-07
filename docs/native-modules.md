@@ -812,7 +812,7 @@ To build an app on a machine without the platform's tools, such as a Linux
 runner of GitHub Actions, prebuild the modules where the tools are:
 
 ```sh
-mygo native prebuild [-repo owner/name] [-no-upload] [module dir]
+mygo native prebuild [-repo owner/name] [-tag name] [-force] [-no-upload] [module dir]
 ```
 
 builds the module's implementations, uploads them as release assets of the
@@ -821,9 +821,21 @@ module, as the [terminal](plugins/terminal.md) plugin ships libghostty-vt:
 every machine then downloads those builds instead of compiling them, and
 they must change with the sources, which `mygo build` checks. It uploads
 with the [GitHub CLI](https://cli.github.com), to the release
-`native-<module>-<hash>` of the repository of the module's git checkout,
-or of `-repo`, where `<hash>` is that of the Swift package's sources;
-`-no-upload` only builds the archive. Commit `mygo-plugin.json`.
+`native-modules` (or `-tag`) of the repository of the module's git
+checkout, or of `-repo`, which it creates once, not as the latest release;
+every module's builds go there. Each file is named after its SHA-256 and
+never replaced, so the builds that older commits record stay
+downloadable. `-no-upload` only builds the archive. Commit
+`mygo-plugin.json`.
+
+The hash it records covers the Swift package's sources, with line endings
+as LF so that checkouts on every platform agree, and those of the native
+modules the module uses. A module whose recorded build matches them is
+left alone, so prebuilding on every push, in a macOS job of CI, uploads
+only what changed; `-force` builds it again. Prebuild each module the app
+uses: a module's archive holds its own library, not those of the modules
+it uses.
+
 `mygo build` takes the prebuilt implementation while its hash is the
 sources', and `mygo dev` where Swift is missing; once the sources change,
 a machine with Swift builds them, with a warning, and one without stops

@@ -10,8 +10,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/internal/nativegen"
 )
 
 func TestMergeModulePlists(t *testing.T) {
@@ -120,10 +123,166 @@ func TestPrebuiltNativeModule(t *testing.T) {
 		t.Fatalf("the framework's link: %q, %v", link, err)
 	}
 
+	// A checkout with CRLF line endings, as git makes on Windows, has the
+	// same sources.
+	write(filepath.Join(src, "Thing.swift"), "func a() {}\r\n")
+	if h, _ := swiftSourceHash(dir); h != hash {
+		t.Fatal("the hash changed with the line endings")
+	}
+
 	// A change of the sources makes it stale.
 	write(filepath.Join(src, "Thing.swift"), "func b() {}\n")
 	if h, _ := swiftSourceHash(dir); h == hash {
 		t.Fatal("the hash did not change with the sources")
+	}
+}
+
+// A module's prebuilt implementation goes stale with the modules it uses,
+// whose Swift it imports and links.
+func TestModuleSourceHashDeps(t *testing.T) {
+	swift := func(dir, src string) {
+		t.Helper()
+		path := filepath.Join(dir, "apple", "Sources", "X", "X.swift")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, b := t.TempDir(), t.TempDir()
+	swift(a, "func a() {}\n")
+	swift(b, "func b() {}\n")
+	dep := &nativegen.Module{Dir: b}
+	m := &nativegen.Module{Dir: a, Deps: map[string]*nativegen.Module{"example.com/b": dep}}
+	alone, err := moduleSourceHash(&nativegen.Module{Dir: a})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if own, _ := swiftSourceHash(a); own != alone {
+		t.Fatalf("a module that uses none: %s, its package's %s", alone, own)
+	}
+	before, err := moduleSourceHash(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before == alone {
+		t.Fatal("the hash does not cover the module it uses")
+	}
+	swift(b, "func c() {}\n")
+	if after, _ := moduleSourceHash(m); after == before {
+		t.Fatal("the hash did not change with the module it uses")
+	}
+}
+
+// fakeGH puts a gh on PATH that keeps releases in a directory, logs its
+// arguments, and fails on anything but release view, create and upload.
+func fakeGH(t *testing.T) (log func() []string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake gh is a shell script")
+	}
+	bin, state := t.TempDir(), t.TempDir()
+	script := `#!/bin/sh
+echo "$*" >> "$STATE/log"
+case "$1 $2" in
+"release view")
+	[ -d "$STATE/$3" ] || { echo "release not found" >&2; exit 1; }
+	ls "$STATE/$3" ;;
+"release create")
+	mkdir "$STATE/$3" ;;
+"release upload")
+	[ -d "$STATE/$3" ] || exit 1
+	for f in "$@"; do last="$f"; done
+	n=$(basename "$last")
+	for a in "$@"; do [ "$a" = --clobber ] && clobber=1; done
+	if [ -e "$STATE/$3/$n" ] && [ -z "$clobber" ]; then echo "asset under the same name already exists" >&2; exit 1; fi
+	cp "$last" "$STATE/$3/$n" ;;
+*)
+	exit 2 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STATE", state)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() []string {
+		data, _ := os.ReadFile(filepath.Join(state, "log"))
+		return strings.Split(strings.TrimSpace(string(data)), "\n")
+	}
+}
+
+func TestUploadPrebuilt(t *testing.T) {
+	log := fakeGH(t)
+	archive := filepath.Join(t.TempDir(), prebuiltName("thing", strings.Repeat("ab", 32)))
+	if err := os.WriteFile(archive, []byte("an archive"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	url, err := uploadPrebuilt("me/app", defaultPrebuildTag, archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "https://github.com/me/app/releases/download/native-modules/thing-darwin-universal-abababababababab.tar.gz"; url != want {
+		t.Fatalf("url %s, want %s", url, want)
+	}
+	got := log()
+	if len(got) != 3 || !strings.HasPrefix(got[0], "release view native-modules --repo me/app") ||
+		!strings.HasPrefix(got[1], "release create native-modules --repo me/app --title native-modules --notes ") ||
+		!strings.HasSuffix(got[1], " --latest=false") ||
+		got[2] != "release upload native-modules --repo me/app "+archive {
+		t.Fatalf("gh ran:\n%s", strings.Join(got, "\n"))
+	}
+
+	// The same file again is there already: it is neither uploaded nor
+	// replaced, and the release is not made again.
+	again, err := uploadPrebuilt("me/app", defaultPrebuildTag, archive)
+	if err != nil || again != url {
+		t.Fatalf("again: %s, %v", again, err)
+	}
+	if got := log(); len(got) != 4 || !strings.HasPrefix(got[3], "release view ") {
+		t.Fatalf("gh ran:\n%s", strings.Join(got, "\n"))
+	}
+	for _, l := range log() {
+		if strings.Contains(l, "--clobber") {
+			t.Fatalf("gh replaced a file: %s", l)
+		}
+	}
+}
+
+// A module whose recorded build matches its sources is not built again,
+// nor uploaded, unless -force.
+func TestPrebuildUpToDate(t *testing.T) {
+	log := fakeGH(t)
+	dir := t.TempDir()
+	src := filepath.Join("..", "..", "examples", "native-module", "modules", "motion")
+	if err := os.CopyFS(dir, os.DirFS(src)); err != nil {
+		t.Fatal(err)
+	}
+	os.RemoveAll(filepath.Join(dir, "apple", ".build"))
+	m, err := nativegen.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := moduleSourceHash(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &prebuilt{Source: hash, File: nativeFile{Name: "x.tar.gz", URL: "https://example.com/x.tar.gz", SHA256: strings.Repeat("0", 64)}}
+	if err := writePrebuilt(dir, "apple", p); err != nil {
+		t.Fatal(err)
+	}
+	if err := runNativePrebuild([]string{"-repo", "me/app", dir}); err != nil {
+		t.Fatal(err)
+	}
+	if got := log(); len(got) != 1 || got[0] != "" {
+		t.Fatalf("gh ran:\n%s", strings.Join(got, "\n"))
+	}
+	if runtime.GOOS != "darwin" {
+		err := runNativePrebuild([]string{"-force", "-repo", "me/app", dir})
+		if err == nil || !strings.Contains(err.Error(), "macOS") {
+			t.Fatalf("-force off macOS: %v", err)
+		}
 	}
 }
 
