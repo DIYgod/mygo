@@ -144,8 +144,8 @@ jobs:
       - name: Test a native module built from its Swift
         if: runner.os != 'Windows'
         run: |
-          go run ./cmd/mygo native build -target host native/internal/roundtrip
-          go test -count=1 ./native/internal/roundtrip/
+          go run ./cmd/mygo native build -target host native/internal/roundtrip/uses  # and roundtrip, which it uses
+          go test -count=1 ./native/internal/roundtrip/...
       - name: Build the example's native modules
         if: runner.os == 'macOS'
         working-directory: examples/native-module

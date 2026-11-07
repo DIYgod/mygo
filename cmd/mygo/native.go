@@ -348,7 +348,9 @@ func buildSwiftModule(dir, goarch string, release bool) (nativeBuild, error) {
 			return nativeBuild{}, err
 		}
 		bin := filepath.Dir(d.dylib)
-		depFlags = append(depFlags, "-Xswiftc", "-I", "-Xswiftc", bin, "-Xlinker", "-L", "-Xlinker", bin, "-Xlinker", "-l"+dep.Name)
+		// SwiftPM puts the .swiftmodule of a build in Modules, from Swift
+		// 6, and next to the library before.
+		depFlags = append(depFlags, "-Xswiftc", "-I", "-Xswiftc", filepath.Join(bin, "Modules"), "-Xswiftc", "-I", "-Xswiftc", bin, "-Xlinker", "-L", "-Xlinker", bin, "-Xlinker", "-l"+dep.Name)
 		key += " " + d.key // it changes with them
 	}
 	return buildSwiftProduct(dir, filepath.Join(dir, "apple"), m.Name, "native module "+m.Package, depFlags, key, goarch, release)
