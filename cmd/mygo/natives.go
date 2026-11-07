@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	fetch "github.com/egoist/mygo/internal/download"
+	"github.com/egoist/mygo/internal/nativegen"
 	"github.com/egoist/mygo/internal/nativelib"
 )
 
@@ -56,8 +57,8 @@ func (c *Config) natives(goos, goarch string) ([]source, error) {
 	seen := map[string]bool{}
 	for _, p := range pkgs {
 		for _, l := range p.manifest.Libraries {
-			if seen[l.Name] {
-				continue
+			if seen[l.Name] || l.Build.IsSwift() {
+				continue // Swift libraries go into Frameworks (prepareNative)
 			}
 			seen[l.Name] = true
 			pick := func(goarch string) (string, string, error) {
@@ -107,6 +108,9 @@ type nativePackage struct {
 	// own, or a module it replaces with a directory, whose libraries are
 	// built from their sources.
 	local bool
+	// module is the native module the package is, whose Swift library its
+	// manifest names, read by nativePackagesIn only.
+	module *nativegen.Module
 }
 
 // builds reports whether the CLI builds l for a platform from its sources
@@ -176,7 +180,6 @@ func (c *Config) packageDirs(goos, goarch string) ([]string, error) {
 
 // readNativePackages reads the manifests of the packages in dirs.
 func readNativePackages(dirs []string) ([]nativePackage, error) {
-	modcache := goEnv("GOMODCACHE")
 	var list []nativePackage
 	for _, dir := range dirs {
 		dir = strings.TrimSpace(dir)
@@ -194,9 +197,7 @@ func readNativePackages(dirs []string) ([]nativePackage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
-		local := (modcache == "" || !strings.HasPrefix(dir, modcache+string(filepath.Separator))) &&
-			!strings.Contains(dir+string(filepath.Separator), string(filepath.Separator)+"vendor"+string(filepath.Separator))
-		list = append(list, nativePackage{dir: dir, manifest: m, local: local})
+		list = append(list, nativePackage{dir: dir, manifest: m, local: isLocalPackage(dir)})
 	}
 	return list, nil
 }

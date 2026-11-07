@@ -1,6 +1,7 @@
-// Package nativelib is what the CLI and package ffi share about the native
-// libraries that Go packages bind: mygo-plugin.json, the file names of
-// libraries on each platform, and where libraries are built and cached.
+// Package nativelib is what the CLI and packages ffi and native share about
+// the native libraries that Go packages bind: mygo-plugin.json, the file
+// names of libraries on each platform, and where libraries are built and
+// cached.
 //
 // A package names its libraries in mygo-plugin.json, next to its sources:
 //
@@ -12,7 +13,8 @@
 //	}]}
 //
 // build is how the CLI builds the library from its sources (a Rust crate
-// with cargo, a Zig package with zig build); files are the published builds,
+// with cargo, a Zig package with zig build, a Swift package with swift
+// build, on macOS); files are the published builds,
 // one per platform (GOOS-GOARCH), which `mygo native build` writes and
 // apps download when they do not build the library themselves.
 package nativelib
@@ -51,13 +53,36 @@ type Library struct {
 	// Release is the URL of the directory the files are published in,
 	// as https://github.com/<owner>/<repo>/releases/download/<tag>.
 	Release string `json:"release,omitempty"`
-	// Files are the published builds, by GOOS-GOARCH.
+	// Files are the published builds, by GOOS-GOARCH, or Universal for
+	// one that serves both architectures of macOS.
 	Files map[string]File `json:"files,omitempty"`
 }
 
-// Build is how a library is built from its sources: exactly one of Cargo
-// and Zig, a directory relative to the package's, written "./rust" to read
-// as one.
+// Universal is the key of Library.Files for a build of macOS's two
+// architectures in one file, as Swift libraries are published.
+const Universal = "darwin-universal"
+
+// File returns the published build of the library for goos/goarch: the
+// platform's own, or on macOS the universal one.
+func (l Library) File(goos, goarch string) (File, bool) {
+	if f, ok := l.Files[goos+"-"+goarch]; ok {
+		return f, true
+	}
+	if goos == "darwin" {
+		f, ok := l.Files[Universal]
+		return f, ok
+	}
+	return File{}, false
+}
+
+// IsArchive reports whether a published file is a .tar.gz of the library
+// and the files that go next to it, as the frameworks a Swift package
+// brings, rather than the library itself.
+func IsArchive(name string) bool { return strings.HasSuffix(name, ".tar.gz") }
+
+// Build is how a library is built from its sources: exactly one of Cargo,
+// Zig and Swift, a directory relative to the package's, written "./rust"
+// to read as one.
 type Build struct {
 	// Cargo is the directory of the Rust crate (its Cargo.toml), whose
 	// crate-type includes "cdylib".
@@ -65,7 +90,13 @@ type Build struct {
 	// Zig is the directory of the Zig package (its build.zig), which
 	// installs a dynamic library.
 	Zig string `json:"zig,omitempty"`
-	// Args are more arguments of `cargo build` or `zig build`.
+	// Swift is the directory of the Swift package (its Package.swift),
+	// whose product named as the library is a dynamic library. Swift
+	// libraries build on macOS, universal, and go into the app's
+	// Frameworks with the frameworks they bring.
+	Swift string `json:"swift,omitempty"`
+	// Args are more arguments of `cargo build`, `zig build` or `swift
+	// build`.
 	Args []string `json:"args,omitempty"`
 	// MacOS is the oldest macOS the library runs on, when it needs a later
 	// one than the app's minimum or 12.0, as "13.0".
@@ -154,13 +185,20 @@ func SourceHash(dir string, b *Build) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// Tool returns the build's tool, "cargo" or "zig", and its directory.
+// Tool returns the build's tool, "cargo", "zig" or "swift", and its
+// directory.
 func (b *Build) Tool() (tool, dir string) {
-	if b.Cargo != "" {
+	switch {
+	case b.Cargo != "":
 		return "cargo", b.Cargo
+	case b.Swift != "":
+		return "swift", b.Swift
 	}
 	return "zig", b.Zig
 }
+
+// IsSwift reports whether the library builds with Swift.
+func (b *Build) IsSwift() bool { return b != nil && b.Swift != "" }
 
 // File is a published build of a library.
 type File struct {
@@ -199,8 +237,8 @@ func Parse(data []byte) (Manifest, error) {
 		}
 		seen[l.Name] = true
 		if b := l.Build; b != nil {
-			if (b.Cargo == "") == (b.Zig == "") {
-				return m, fmt.Errorf("library %s: build needs one of cargo and zig", l.Name)
+			if n := btoi(b.Cargo != "") + btoi(b.Zig != "") + btoi(b.Swift != ""); n != 1 {
+				return m, fmt.Errorf("library %s: build needs one of cargo, zig and swift", l.Name)
 			}
 			if _, dir := b.Tool(); filepath.IsAbs(dir) || !filepath.IsLocal(filepath.FromSlash(dir)) {
 				return m, fmt.Errorf("library %s: the build's directory %q is not inside the package", l.Name, dir)
@@ -216,6 +254,13 @@ func Parse(data []byte) (Manifest, error) {
 		}
 	}
 	return m, nil
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // Lookup returns the library named name.

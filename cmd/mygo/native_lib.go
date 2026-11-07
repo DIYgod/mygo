@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	fetch "github.com/egoist/mygo/internal/download"
+	"github.com/egoist/mygo/internal/nativegen"
 	"github.com/egoist/mygo/internal/nativelib"
 )
 
@@ -86,15 +87,20 @@ func runNativeBuild(args []string) error {
 	for _, p := range pkgs {
 		for i := range p.manifest.Libraries {
 			if l := &p.manifest.Libraries[i]; l.Build != nil {
-				if *upload && cmp.Or(*release, l.Release) == "" {
-					return fmt.Errorf("-upload: %s has no release: name one with -release", l.Name)
+				if *upload && *release == "" && l.Release == "" {
+					// The repository's one release of native libraries.
+					repo, err := gitHubRepo(p.dir)
+					if err != nil {
+						return fmt.Errorf("-upload: %s has no release: %w", l.Name, err)
+					}
+					l.Release = "https://github.com/" + repo + "/releases/download/" + defaultReleaseTag
 				}
 				libs = append(libs, l)
 			}
 		}
 	}
 	if len(libs) == 0 {
-		return fmt.Errorf("no %s in %s names a library to build (\"build\": {\"cargo\": \"./<dir>\"} or {\"zig\": \"./<dir>\"})", pluginFile, dir)
+		return fmt.Errorf("no %s in %s names a library to build (\"build\": {\"cargo\": \"./<dir>\"}, {\"zig\": \"./<dir>\"} or {\"swift\": \"./<dir>\"}), nor is a native module", pluginFile, dir)
 	}
 	if !host {
 		warnNativeRelease(pkgs, targets)
@@ -113,6 +119,23 @@ func runNativeBuild(args []string) error {
 				continue
 			}
 			r := cmp.Or(*release, l.Release)
+			if l.Build.IsSwift() {
+				a, err := publishSwift(p, l, targets, host, *force, *out, r)
+				switch {
+				case err != nil && host:
+					return err
+				case err != nil:
+					failed = append(failed, fmt.Sprintf("%s: %v", l.Name, err))
+				case a != "":
+					assets = append(assets, a)
+					if r != "" {
+						uploads[r] = append(uploads[r], a)
+					}
+					l.Release = r
+					changed[p.dir] = true
+				}
+				continue
+			}
 			_, d := l.Build.Tool()
 			src := filepath.Join(p.dir, filepath.FromSlash(d))
 			before, err := nativelib.SourceHash(src, l.Build)
@@ -244,18 +267,160 @@ func nativeTargets(s string) ([]string, error) {
 }
 
 // nativePackagesIn returns the package in dir when it names native
-// libraries, or else the packages under dir that do.
+// libraries or is a native module, or else the packages under dir that
+// are. A native module's manifest names its Swift library, as
+// moduleLibrary reads it.
 func nativePackagesIn(dir string) ([]nativePackage, error) {
-	if _, err := os.Stat(filepath.Join(dir, pluginFile)); err == nil {
-		return readNativePackages([]string{dir})
+	dirs := []string{dir}
+	if _, err := os.Stat(filepath.Join(dir, pluginFile)); err != nil && !isSwiftModule(dir) {
+		var out, stderr bytes.Buffer
+		cmd := goCommand(dir, nil, "list", "-e", "-f", "{{.Dir}}", "./...")
+		cmd.Stdout, cmd.Stderr = &out, &stderr
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("go list: %v\n%s", err, strings.TrimSpace(stderr.String()))
+		}
+		dirs = strings.Fields(out.String())
 	}
-	var out, stderr bytes.Buffer
-	cmd := goCommand(dir, nil, "list", "-e", "-f", "{{.Dir}}", "./...")
-	cmd.Stdout, cmd.Stderr = &out, &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("go list: %v\n%s", err, strings.TrimSpace(stderr.String()))
+	pkgs, err := readNativePackages(dirs)
+	if err != nil {
+		return nil, err
 	}
-	return readNativePackages(strings.Split(out.String(), "\n"))
+	have := map[string]int{}
+	for i, p := range pkgs {
+		have[p.dir] = i
+	}
+	for _, d := range dirs {
+		if !isSwiftModule(d) {
+			continue
+		}
+		m, err := nativegen.Load(d)
+		if err != nil {
+			return nil, err
+		}
+		lib, err := moduleLibrary(m)
+		if err != nil {
+			return nil, err
+		}
+		i, ok := have[d]
+		if !ok {
+			pkgs = append(pkgs, nativePackage{dir: d, local: isLocalPackage(d)})
+			i = len(pkgs) - 1
+		}
+		p := &pkgs[i]
+		p.module = m
+		if _, ok := p.manifest.Lookup(lib.Name); !ok {
+			p.manifest.Libraries = append(p.manifest.Libraries, lib)
+		}
+	}
+	return pkgs, nil
+}
+
+// isSwiftModule reports whether dir holds a native module implemented in
+// Swift.
+func isSwiftModule(dir string) bool {
+	return nativegen.IsModule(dir) && nativegen.HasPlatform(dir, "apple")
+}
+
+// defaultReleaseTag is the release that mygo native build -upload uploads
+// to without -release or a library's release: one for every library of
+// the repository, so that publishing makes no release, nor tag, per
+// change.
+const defaultReleaseTag = "native-libraries"
+
+// publishSwift builds the Swift library l of package p, universal, when
+// targets include macOS and its published build is not of its sources (or
+// force), packs it with the frameworks it brings into the directory of the
+// files to publish (out), named after its SHA-256, records it in l.Files
+// under nativelib.Universal, and returns it. With host, it builds the
+// debug build of this Mac for go run and go test instead, and records
+// nothing. It returns "" when there is nothing to publish.
+func publishSwift(p nativePackage, l *nativelib.Library, targets []string, host, force bool, out, release string) (string, error) {
+	if !slices.ContainsFunc(targets, func(t string) bool { return strings.HasPrefix(t, "darwin-") }) {
+		return "", nil
+	}
+	errMac := errors.New("Swift libraries build on a Mac, with Xcode or its Command Line Tools")
+	m := p.module
+	if m != nil {
+		if _, err := nativegen.Generate(p.dir); err != nil {
+			return "", err
+		}
+	}
+	if host && runtime.GOOS != "darwin" {
+		return "", errMac
+	}
+	if host {
+		if m != nil {
+			_, err := buildSwiftModule(p.dir, runtime.GOARCH, false)
+			return "", err
+		}
+		_, err := buildSwiftLibrary(p.dir, *l, runtime.GOARCH, false)
+		return "", err
+	}
+	hash, err := swiftSourceHash(p.dir, *l, m)
+	if err != nil {
+		return "", err
+	}
+	if f, ok := l.Files[nativelib.Universal]; ok && !force && f.SourceHash == hash {
+		logf("%s for %s is published from these sources", l.Name, nativelib.Universal)
+		return "", nil
+	}
+	if runtime.GOOS != "darwin" {
+		return "", errMac
+	}
+	var b nativeBuild
+	if m != nil {
+		b, err = buildSwiftModule(p.dir, "universal", true)
+	} else {
+		b, err = buildSwiftLibrary(p.dir, *l, "universal", true)
+	}
+	if err != nil {
+		return "", err
+	}
+	if out == "" {
+		root, err := nativelib.ModuleRoot(p.dir)
+		if err != nil {
+			return "", err
+		}
+		out = filepath.Join(root, ".mygo", "native", "release")
+	}
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return "", err
+	}
+	packed := filepath.Join(out, l.Name+"-packing.tar.gz")
+	defer os.Remove(packed)
+	if err := tarDir(packed, append([]string{b.dylib}, b.frameworks...)); err != nil {
+		return "", err
+	}
+	sum, err := fetch.FileSHA256(packed)
+	if err != nil {
+		return "", err
+	}
+	// The SHA-256 is part of the name, as publishNative's.
+	prefix := filepath.Join(out, l.Name+"-"+nativelib.Universal+"-")
+	asset := prefix + sum[:12] + ".tar.gz"
+	old, _ := filepath.Glob(prefix + "*.tar.gz")
+	for _, f := range old {
+		if f != asset {
+			os.Remove(f)
+		}
+	}
+	if err := os.Rename(packed, asset); err != nil {
+		return "", err
+	}
+	f := nativelib.File{Name: l.Name + "-" + nativelib.Universal + ".tar.gz", SHA256: sum, SourceHash: hash}
+	if release != "" {
+		f.URL = strings.TrimSuffix(release, "/") + "/" + filepath.Base(asset)
+	}
+	if cached, err := nativelib.CachePath(f); err == nil && !fetch.Check(cached, sum) {
+		if err := replaceFile(asset, cached); err != nil {
+			return "", err
+		}
+	}
+	if l.Files == nil {
+		l.Files = map[string]nativelib.File{}
+	}
+	l.Files[nativelib.Universal] = f
+	return asset, nil
 }
 
 // publishNative copies a library built for goos/goarch into the directory
@@ -341,10 +506,19 @@ func uploadNatives(release string, files []string) error {
 			return fmt.Errorf("gh release create: %v\n%s", err, out)
 		}
 	}
-	// The files' names carry their SHA-256: one replaced is the same file.
+	// The files' names carry their SHA-256: one there already is the same
+	// file, which is neither uploaded again nor replaced.
+	there, _ := exec.Command(gh, "release", "view", tag, "--repo", repo, "--json", "assets", "--jq", ".assets[].name").Output()
+	files = slices.DeleteFunc(slices.Clone(files), func(f string) bool {
+		return slices.Contains(strings.Fields(string(there)), filepath.Base(f))
+	})
+	if len(files) == 0 {
+		logf("The files are uploaded already")
+		return nil
+	}
 	slices.Sort(files)
 	t := con.start("Uploading " + uploadNames(files))
-	out, err := exec.Command(gh, append([]string{"release", "upload", tag, "--repo", repo, "--clobber"}, files...)...).CombinedOutput()
+	out, err := exec.Command(gh, append([]string{"release", "upload", tag, "--repo", repo}, files...)...).CombinedOutput()
 	if t.end(err, "Uploaded "+uploadNames(files)) != nil {
 		return fmt.Errorf("gh release upload: %v\n%s", err, out)
 	}
