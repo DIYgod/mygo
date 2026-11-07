@@ -133,7 +133,20 @@ func prepareNative(c *Config, goos, goarch string, mode nativeMode) (err error) 
 				return fmt.Errorf("the generated files of native module %s are older than its interfaces (%s): run mygo generate and commit them", rel, relPathTo(c.root, stale[0]))
 			}
 		}
-		if goos != "darwin" || !nativegen.HasPlatform(dir, "apple") {
+		// Linux runs a module's Swift under go test and go run only.
+		devLinux := mode == nativeDev && goos == "linux" && runtime.GOOS == "linux" && goarch == runtime.GOARCH
+		if goos != "darwin" && !devLinux || !nativegen.HasPlatform(dir, "apple") {
+			continue
+		}
+		if devLinux {
+			if _, err := exec.LookPath("swift"); err != nil {
+				continue // the module is unsupported here, as without Swift
+			}
+			// A module of Apple's frameworks does not build here, which
+			// leaves it unsupported rather than failing the app.
+			if _, err := buildSwiftModule(dir, goarch, false); err != nil {
+				warnf("Native module %s does not build on Linux, where it is unsupported: %v", rel, firstLine(err.Error()))
+			}
 			continue
 		}
 		b, err := moduleBuild(c, dir, goarch, mode)
@@ -281,7 +294,7 @@ func installLocal(dir string, b nativeBuild) error {
 	if err != nil {
 		return err
 	}
-	dst := nativelib.LocalDir(root, "darwin", runtime.GOARCH)
+	dst := nativelib.LocalDir(root, runtime.GOOS, runtime.GOARCH)
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return err
 	}
@@ -363,7 +376,9 @@ func buildSwiftProduct(dir, src, product, what string, args []string, key, goarc
 	if ok {
 		return b, nil
 	}
-	if runtime.GOOS != "darwin" {
+	// Linux builds this machine's debug build, for go test and go run.
+	linux := runtime.GOOS == "linux" && !release && goarch == runtime.GOARCH
+	if runtime.GOOS != "darwin" && !linux {
 		return nativeBuild{}, fmt.Errorf("%s is implemented in Swift, which builds on macOS, with Xcode or its Command Line Tools", what)
 	}
 	if _, err := exec.LookPath("swift"); err != nil {
@@ -373,7 +388,10 @@ func buildSwiftProduct(dir, src, product, what string, args []string, key, goarc
 	if release {
 		config = "release"
 	}
-	cmdArgs := append([]string{"build", "--package-path", src, "-c", config, "--product", product}, swiftArchs(goarch)...)
+	cmdArgs := []string{"build", "--package-path", src, "-c", config, "--product", product}
+	if !linux {
+		cmdArgs = append(cmdArgs, swiftArchs(goarch)...)
+	}
 	cmdArgs = append(cmdArgs, args...)
 	t := con.start("Building " + what)
 	var out bytes.Buffer
@@ -387,7 +405,7 @@ func buildSwiftProduct(dir, src, product, what string, args []string, key, goarc
 		return nativeBuild{}, t.end(fmt.Errorf("swift build --show-bin-path: %v", err), "")
 	}
 	binDir := strings.TrimSpace(string(bin))
-	b = nativeBuild{name: product, dir: dir, dylib: filepath.Join(binDir, "lib"+product+".dylib"), key: key}
+	b = nativeBuild{name: product, dir: dir, dylib: filepath.Join(binDir, nativelib.FileName(product, runtime.GOOS)), key: key}
 	if _, err := os.Stat(b.dylib); err != nil {
 		return nativeBuild{}, t.end(fmt.Errorf("%s: swift build made no %s: keep the product %s a dynamic library in Package.swift", what, filepath.Base(b.dylib), product), "")
 	}
@@ -442,6 +460,10 @@ var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m|\x1b\]8;;[^\x1b]*\x1b\\`)
 func copyPath(src, dst string) error {
 	if err := os.RemoveAll(dst); err != nil {
 		return err
+	}
+	if runtime.GOOS != "darwin" {
+		// Off macOS, the builds of go test are a library, no bundle.
+		return replaceFile(src, dst)
 	}
 	out, err := exec.Command("ditto", src, dst).CombinedOutput()
 	if err != nil {
@@ -843,4 +865,10 @@ func parsePlist(data []byte) (map[string]any, error) {
 			return v.(map[string]any), nil
 		}
 	}
+}
+
+// firstLine returns the first line of s.
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }

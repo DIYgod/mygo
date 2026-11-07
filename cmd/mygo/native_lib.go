@@ -335,7 +335,7 @@ const defaultReleaseTag = "native-libraries"
 // debug build of this Mac for go run and go test instead, and records
 // nothing. It returns "" when there is nothing to publish.
 func publishSwift(p nativePackage, l *nativelib.Library, targets []string, host, force bool, out, release string) (string, error) {
-	if !slices.ContainsFunc(targets, func(t string) bool { return strings.HasPrefix(t, "darwin-") }) {
+	if !host && !slices.ContainsFunc(targets, func(t string) bool { return strings.HasPrefix(t, "darwin-") }) {
 		return "", nil
 	}
 	errMac := errors.New("Swift libraries build on a Mac, with Xcode or its Command Line Tools")
@@ -345,8 +345,8 @@ func publishSwift(p nativePackage, l *nativelib.Library, targets []string, host,
 			return "", err
 		}
 	}
-	if host && runtime.GOOS != "darwin" {
-		return "", errMac
+	if host && runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		return "", errMac // Linux builds one for go test and go run
 	}
 	if host {
 		if m != nil {

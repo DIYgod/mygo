@@ -5,8 +5,10 @@
 // and the functions Go calls. See docs/native-modules.md.
 
 import Foundation
+#if canImport(IOSurface)
 import CoreVideo
 import IOSurface
+#endif
 #if canImport(AppKit)
 import AppKit
 #endif
@@ -216,6 +218,7 @@ public final class NativeTexture: Codable, @unchecked Sendable {
         try c.encode(id, forKey: .id)
     }
 
+#if canImport(IOSurface)
     /// The attributes of the pixel buffers native UI draws without
     /// converting them: 32-bit BGRA, backed by IOSurfaces, for Metal.
     public var pixelBufferAttributes: [String: Any] {
@@ -246,8 +249,10 @@ public final class NativeTexture: Codable, @unchecked Sendable {
     public func displayLink(_ f: @escaping @Sendable (CFTimeInterval) -> Void) -> NativeDisplayLink {
         NativeDisplayLink(f)
     }
+#endif
 }
 
+#if canImport(IOSurface)
 /// Calls back on each refresh of the display, until invalidated.
 public final class NativeDisplayLink: @unchecked Sendable {
     private var link: CVDisplayLink?
@@ -271,6 +276,7 @@ public final class NativeDisplayLink: @unchecked Sendable {
 
     deinit { invalidate() }
 }
+#endif
 
 // MARK: - Glue
 

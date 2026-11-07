@@ -67,7 +67,8 @@ import (
 type Library struct {
 	name string
 	lib  nativelib.Library
-	bad  error // what is wrong with the manifest
+	bad  error  // what is wrong with the manifest
+	dir  string // the package's directory, set by From
 
 	once   sync.Once
 	handle uintptr
@@ -105,6 +106,15 @@ func New(name string, manifest []byte) *Library {
 	return l
 }
 
+// From tells l the directory of the package that binds it, when the
+// program knows it, as from runtime.Caller: the CLI's builds in that
+// package's module are found too, whatever the working directory. It
+// returns l, and is called before the library loads.
+func (l *Library) From(dir string) *Library {
+	l.dir = dir
+	return l
+}
+
 // Name returns the library's name.
 func (l *Library) Name() string { return l.name }
 
@@ -125,14 +135,16 @@ func EnvVar(name string) string {
 //   - the file $MYGO_NATIVE_<NAME> names (see EnvVar);
 //   - the one among the app's resources (mygo.PathResources), where `mygo
 //     build` and `mygo dev` put it, signed with the app on macOS;
+//   - on macOS, the one in the app's Contents/Frameworks, where Swift
+//     libraries go;
 //   - the one next to the executable;
 //
 // and, in programs that are not packaged apps, as under `go run` and `go
 // test`:
 //
 //   - the one the CLI built from sources (`mygo native build -target host`,
-//     or `mygo dev`), in .mygo/native/<goos>-<goarch> of the working
-//     directory's module;
+//     or `mygo dev`), in .mygo/native/<goos>-<goarch> of the module of the
+//     package's directory (see From) or of the working directory;
 //   - the published one in the user's cache (<cache>/mygo/natives/<sha256>/),
 //     downloaded there when it is missing, checking its SHA-256.
 //
@@ -151,10 +163,16 @@ func (l *Library) Path() (string, error) {
 		dirs = append(dirs, dir)
 	}
 	if exe, err := os.Executable(); err == nil {
+		if runtime.GOOS == "darwin" {
+			dirs = append(dirs, filepath.Join(filepath.Dir(exe), "..", "Frameworks"))
+		}
 		dirs = append(dirs, filepath.Dir(exe))
 	}
 	packaged := mygo.App.IsPackaged()
 	if !packaged {
+		if l.dir != "" {
+			dirs = append(dirs, localDirsFrom(l.dir)...)
+		}
 		dirs = append(dirs, localDirs()...)
 	}
 	for _, dir := range dirs {
@@ -167,7 +185,11 @@ func (l *Library) Path() (string, error) {
 		return "", fmt.Errorf("ffi: %s is missing from the app: build it with mygo build", name)
 	}
 	target := runtime.GOOS + "-" + runtime.GOARCH
-	f, ok := lib.Files[target]
+	f, ok := lib.File(runtime.GOOS, runtime.GOARCH)
+	if ok && nativelib.IsArchive(f.Name) {
+		// Only the CLI unpacks archives, into the app.
+		return "", fmt.Errorf("ffi: %s is not built for %s: build it with mygo native build -target host (or run the app with mygo dev)", l.name, target)
+	}
 	if !ok {
 		if lib.Build != nil {
 			return "", fmt.Errorf("ffi: %s is not built for %s: build it from its sources with mygo native build -target host (or run the app with mygo dev)", l.name, target)
@@ -215,6 +237,13 @@ func localDirs() []string {
 	if err != nil {
 		return nil
 	}
+	return localDirsFrom(dir)
+}
+
+// localDirsFrom returns where the CLI puts the libraries it builds in the
+// module of dir, and of the directories above it up to that module's
+// root.
+func localDirsFrom(dir string) []string {
 	var dirs []string
 	for {
 		dirs = append(dirs, nativelib.LocalDir(dir, runtime.GOOS, runtime.GOARCH))
